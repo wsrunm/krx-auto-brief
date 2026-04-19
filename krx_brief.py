@@ -39,17 +39,16 @@ def download_krx_brief():
     return None
 
 def summarize_pdf(pdf_path):
-    """Gemini 2.0-Flash 모델로 요약 (2026년 최신 규격)"""
+    """Gemini 1.5-Flash 모델로 변경 (무료 할당량 안정성 확보)"""
     if not GEMINI_API_KEY: return "Gemini 키가 설정되지 않았습니다."
-    print("🤖 Gemini 2.0 분석 시작...")
+    print("🤖 Gemini 1.5 분석 시작...")
     client = genai.Client(api_key=GEMINI_API_KEY)
     
-    # 파일 업로드 (file 파라미터 사용)
+    # 2.0에서 1.5-flash로 변경 (가장 안정적임)
     uploaded_file = client.files.upload(file=pdf_path)
     
-    # 요약 요청
     response = client.models.generate_content(
-        model='gemini-2.0-flash', 
+        model='gemini-1.5-flash', 
         contents=[uploaded_file, "이 증시 브리프 리포트의 핵심 내용을 투자 PM 관점에서 3줄로 요약하고, 특이사항이 있다면 알려줘. 한국어로 응답해줘."]
     )
     return response.text
