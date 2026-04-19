@@ -2,20 +2,28 @@ name: Daily KRX Brief Automation
 
 on:
   schedule:
-    # 매일 평일 오후 5시 30분 실행 (UTC 08:30)
+    # 매일 평일 오후 5시 30분 실행 (KST 기준)
     - cron: '30 8 * * 1-5'
-  workflow_dispatch: # 수동 실행 가능
+  workflow_dispatch: # 버튼 눌러서 수동 실행 가능
+
+# [중요] 쓰기 권한을 명시적으로 허용합니다
+permissions:
+  contents: write
 
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
-
-      - name: Set up Python
-        uses: actions/setup-python@v4
+      # 최신 버전인 @v4로 업데이트하여 Node.js 경고 해결
+      - uses: actions/checkout@v4
         with:
-          python-version: '3.9'
+          ref: main # detached HEAD 에러 방지를 위해 main 브랜치 명시
+
+      # 최신 버전인 @v5로 업데이트
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
 
       - name: Install dependencies
         run: |
@@ -31,6 +39,12 @@ jobs:
         run: |
           git config --global user.name "KRX Bot"
           git config --global user.email "bot@github.com"
+          # 새로운 파일이 있을 때만 커밋하도록 설정
           git add *.pdf
-          git commit -m "Add daily brief: $(date +'%Y-%m-%d')"
-          git push
+          if git diff --staged --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "Add daily brief: $(date +'%Y-%m-%d')"
+            git push
+          fi
+          
