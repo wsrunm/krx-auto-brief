@@ -113,16 +113,28 @@ if __name__ == "__main__":
     pdf_file = download_krx_brief()
     if pdf_file:
         print(f"✅ 파일 준비 완료: {pdf_file}")
-        # 2. 요약
+        
+        # 2. 요약 시도 및 에러 출력
         try:
             summary = summarize_pdf(pdf_file)
             send_to_telegram(text=f"📝 [오늘의 시황 요약]\n\n{summary}")
-        except: print("요약 건너뜀")
-        # 3. 이미지 변환
+            print("✅ Gemini 요약 전송 완료")
+        except Exception as e:
+            print(f"❌ 요약 실패 원인: {e}") # 여기서 진짜 이유가 나옵니다.
+
+        # 3. 이미지 변환 및 전송
         img_file = convert_to_image(pdf_file)
-        if img_file: send_to_telegram(image_path=img_file)
-        # 4. 파일 전송
+        if img_file:
+            send_to_telegram(image_path=img_file)
+            print("✅ 이미지 전송 완료")
+        
+        # 4. 원본 파일 전송
         send_to_telegram(file_path=pdf_file)
-        # 5. 드라이브 업로드
-        try: upload_to_gdrive(pdf_file)
-        except: print("드라이브 업로드 건너뜀")
+        print("✅ 원본 PDF 전송 완료")
+
+        # 5. 드라이브 업로드 시도 및 에러 출력
+        try:
+            upload_to_gdrive(pdf_file)
+            print("✅ 구글 드라이브 업로드 완료")
+        except Exception as e:
+            print(f"❌ 드라이브 업로드 실패 원인: {e}") # 여기서 진짜 이유가 나옵니다.
