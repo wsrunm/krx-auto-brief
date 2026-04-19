@@ -4,24 +4,18 @@ on:
   schedule:
     # 매일 평일 오후 5시 30분 실행 (KST 기준)
     - cron: '30 8 * * 1-5'
-  workflow_dispatch: # 버튼 눌러서 수동 실행 가능
+  workflow_dispatch: # 수동 실행 버튼
 
-# [중요] 쓰기 권한을 명시적으로 허용합니다
 permissions:
-  contents: write
+  contents: write  # 쓰기 권한 허용
 
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      # 최신 버전인 @v4로 업데이트하여 Node.js 경고 해결
-      - uses: actions/checkout@v4
-        with:
-          ref: main # detached HEAD 에러 방지를 위해 main 브랜치 명시
-
-      # 최신 버전인 @v5로 업데이트
+      - uses: actions/checkout@v4  # 최신 버전
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v5  # 최신 버전
         with:
           python-version: '3.11'
 
@@ -39,12 +33,11 @@ jobs:
         run: |
           git config --global user.name "KRX Bot"
           git config --global user.email "bot@github.com"
-          # 새로운 파일이 있을 때만 커밋하도록 설정
           git add *.pdf
+          # 변경사항(새 PDF)이 있을 때만 푸시
           if git diff --staged --quiet; then
-            echo "No changes to commit"
+            echo "No new files to commit"
           else
             git commit -m "Add daily brief: $(date +'%Y-%m-%d')"
             git push
           fi
-          
