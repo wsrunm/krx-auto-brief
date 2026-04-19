@@ -2,83 +2,90 @@ import requests
 import os
 import datetime
 import re
+import json
 from pdf2image import convert_from_path
+import google.generativeai as genai
+from google.oauth2 import service_account
+from googleapiclient.discovery import build
+from googleapiclient.http import MediaFileUpload
 
-def get_latest_seq():
-    """게시판에서 최신 게시물 번호를 자동으로 가져옵니다."""
-    try:
-        list_url = "https://www.krx.co.kr/contents/SRCH/02/02030100/SRCH02030100.jsp"
-        res = requests.get(list_url, timeout=10)
-        match = re.search(r"downFile\('(\d+)'", res.text)
-        return match.group(1) if match else "2026041721"
-    except:
-        return "2026041721"
+# 1. 환경 설정
+GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY')
+GDRIVE_JSON = os.environ.get('GDRIVE_SERVICE_ACCOUNT')
+# 구글 드라이브 폴더 ID (폴더 주소창 마지막 문자열)
+GDRIVE_FOLDER_ID = "사용자의_구글드라이브_폴더_ID_입력" 
 
-def download_krx_brief():
-    session = requests.Session()
-    session.headers.update({
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-        'Referer': 'https://www.krx.co.kr/'
-    })
+# Gemini 설정
+genai.configure(api_key=GEMINI_API_KEY)
 
-    try:
-        seq = get_latest_seq()
-        # 1. OTP 발급
-        otp_res = session.get("https://www.krx.co.kr/contents/COM/GenerateOTP.jspx", params={
-            'name': 'fileDown', 'filetype': 'att', 
-            'url': 'MKD/01/0101/01010000/mkd01010000_03', 'seq': seq
-        })
-        otp_code = otp_res.text.strip()
+def summarize_pdf(pdf_path):
+    """Gemini API를 사용하여 PDF 요약 생성"""
+    print("🤖 Gemini가 리포트를 분석 중입니다...")
+    model = genai.GenerativeModel('gemini-1.5-flash')
+    
+    # PDF 파일 업로드 및 분석
+    sample_file = genai.upload_file(path=pdf_path, display_name="KRX Brief")
+    response = model.generate_content([sample_file, "이 증시 브리프 리포트의 핵심 내용을 3줄로 요약하고, 투자자가 주의 깊게 봐야 할 지표를 알려줘. 한국어로 응답해줘."])
+    return response.text
 
-        # 2. 파일 다운로드
-        pdf_res = session.get("https://file.krx.co.kr/download.jspx", params={'code': otp_code})
-        
-        if pdf_res.content.startswith(b'%PDF'):
-            file_name = f"KRX_Brief_{datetime.datetime.now().strftime('%Y%m%d')}.pdf"
-            with open(file_name, 'wb') as f:
-                f.write(pdf_res.content)
-            return file_name
-    except Exception as e:
-        print(f"다운로드 중 오류: {e}")
-    return None
+def upload_to_gdrive(file_path):
+    """구글 드라이브에 파일 업로드 (NotebookLM 연동용)"""
+    if not GDRIVE_JSON: return
+    
+    print("☁️ 구글 드라이브 업로드 중...")
+    info = json.loads(GDRIVE_JSON)
+    creds = service_account.Credentials.from_service_account_info(info)
+    service = build('drive', 'v3', credentials=creds)
 
-def convert_to_image(pdf_path):
-    """PDF의 첫 페이지를 JPG로 변환합니다."""
-    try:
-        # DPI 200으로 설정하여 선명하게 변환
-        images = convert_from_path(pdf_path, dpi=200)
-        if images:
-            img_path = pdf_path.replace(".pdf", ".jpg")
-            images[0].save(img_path, "JPEG")
-            return img_path
-    except Exception as e:
-        print(f"이미지 변환 실패: {e}")
-    return None
+    file_metadata = {
+        'name': os.path.basename(file_path),
+        'parents': [GDRIVE_FOLDER_ID]
+    }
+    media = MediaFileUpload(file_path, mimetype='application/pdf')
+    service.files().create(body=file_metadata, media_body=media, fields='id').execute()
+    print("✅ 구글 드라이브 업로드 완료")
 
-def send_to_telegram(file_path, is_image=False):
+# ... (이전에 작성한 get_latest_seq, download_krx_brief, convert_to_image 함수 유지) ...
+
+def send_to_telegram(text=None, image_path=None, file_path=None):
     token = os.environ.get('TELEGRAM_TOKEN')
     chat_id = os.environ.get('TELEGRAM_CHAT_ID')
     
-    # 이미지면 sendPhoto, 파일이면 sendDocument 사용
-    method = "sendPhoto" if is_image else "sendDocument"
-    url = f"https://api.telegram.org/bot{token}/{method}"
+    if text:
+        url = f"https://api.telegram.org/bot{token}/sendMessage"
+        requests.post(url, data={'chat_id': chat_id, 'text': text})
     
-    with open(file_path, 'rb') as f:
-        payload = {'chat_id': chat_id}
-        if is_image:
-            payload['caption'] = f"📊 오늘자 KRX 증시 브리프 ({datetime.datetime.now().strftime('%Y-%m-%d')})"
-            files = {'photo': f}
-        else:
-            files = {'document': f}
-        requests.post(url, data=payload, files=files)
+    if image_path:
+        url = f"https://api.telegram.org/bot{token}/sendPhoto"
+        with open(image_path, 'rb') as f:
+            requests.post(url, data={'chat_id': chat_id}, files={'photo': f})
+
+    if file_path:
+        url = f"https://api.telegram.org/bot{token}/sendDocument"
+        with open(file_path, 'rb') as f:
+            requests.post(url, data={'chat_id': chat_id}, files={'document': f})
 
 if __name__ == "__main__":
     pdf_file = download_krx_brief()
     if pdf_file:
-        # 1. 이미지로 변환해서 먼저 보내기 (채팅창에서 바로 보임)
+        # 1. Gemini 요약 생성 및 전송
+        try:
+            summary = summarize_pdf(pdf_file)
+            send_to_telegram(text=f"📝 [Gemini 요약]\n\n{summary}")
+        except Exception as e:
+            print(f"요약 실패: {e}")
+
+        # 2. 이미지 변환 및 전송
         img_file = convert_to_image(pdf_file)
         if img_file:
-            send_to_telegram(img_file, is_image=True)
+            send_to_telegram(image_path=img_file)
         
-        # 2. 원본 PDF 파일도 같이 보내기 (보관용)
-        send_to_telegram(pdf_file, is_image=False)
+        # 3. 원본 PDF 전송
+        send_to_telegram(file_path=pdf_file)
+
+        # 4. 구글 드라이브 업로드 (NotebookLM용)
+        try:
+            upload_to_gdrive(pdf_file)
+        except Exception as e:
+            print(f"드라이브 업로드 실패: {e}")
+
