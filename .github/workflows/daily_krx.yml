@@ -29,11 +29,10 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y poppler-utils
-
+          
       - name: Install Python Packages
-        # Gemini, Google Drive API, PDF 변환 관련 패키지 설치
         run: |
-          pip install requests beautifulsoup4 pdf2image google-generativeai google-api-python-client google-auth-httplib2 google-auth-oauthlib
+          pip install requests beautifulsoup4 pdf2image google-genai google-api-python-client google-auth-httplib2 google-auth-oauthlib
 
       - name: Run KRX Automation
         env:
