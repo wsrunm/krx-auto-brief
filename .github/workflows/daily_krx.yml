@@ -2,8 +2,11 @@ name: Daily KRX Brief Automation
 
 on:
   schedule:
-    - cron: '30 8 * * 1-5'
+    - cron: '30 8 * * 1-5' # 월~금 오후 5시 30분 (KST)
   workflow_dispatch:
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true' # Node.js 경고 제거
 
 permissions:
   contents: write
@@ -20,10 +23,16 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Install dependencies
-        run: pip install requests beautifulsoup4
+      - name: Install System Dependencies
+        # PDF를 이미지로 바꾸는 도구(poppler)를 서버에 설치합니다.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y poppler-utils
 
-      - name: Run Downloader
+      - name: Install Python Packages
+        run: pip install requests beautifulsoup4 pdf2image
+
+      - name: Run Downloader and Converter
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
@@ -33,16 +42,12 @@ jobs:
         run: |
           git config --global user.name "KRX Bot"
           git config --global user.email "bot@github.com"
-          
-          # [핵심 변경] find 명령어로 PDF 파일이 있는지 직접 확인합니다.
-          if [ -n "$(find . -maxdepth 1 -name '*.pdf' -print -quit)" ]; then
-            git add *.pdf
+          if ls *.pdf 1> /dev/null 2>&1; then
+            git add *.pdf *.jpg
             if git diff --staged --quiet; then
-              echo "변경사항 없음."
+              echo "No changes."
             else
-              git commit -m "Add latest KRX brief"
+              git commit -m "Add latest brief and image"
               git push
             fi
-          else
-            echo "업로드할 PDF 파일이 없습니다. 종료합니다."
           fi
