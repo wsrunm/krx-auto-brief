@@ -2,20 +2,21 @@ name: Daily KRX Brief Automation
 
 on:
   schedule:
-    - cron: '30 8 * * 1-5' # 월~금 오후 5시 30분 (KST)
+    # 한국 시간 오후 5시 (UTC 오전 8시) 실행
+    - cron: '0 8 * * 1-5' 
   workflow_dispatch:
 
 env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true' # Node.js 경고 제거
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
 
 permissions:
   contents: write
 
 jobs:
-  build:
+  automation:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
+      - name: Checkout Code
         uses: actions/checkout@v4
 
       - name: Set up Python
@@ -24,30 +25,35 @@ jobs:
           python-version: '3.11'
 
       - name: Install System Dependencies
-        # PDF를 이미지로 바꾸는 도구(poppler)를 서버에 설치합니다.
+        # PDF를 이미지로 변환하기 위한 poppler-utils 설치
         run: |
           sudo apt-get update
           sudo apt-get install -y poppler-utils
 
       - name: Install Python Packages
-        run: pip install requests beautifulsoup4 pdf2image
+        # Gemini, Google Drive API, PDF 변환 관련 패키지 설치
+        run: |
+          pip install requests beautifulsoup4 pdf2image google-generativeai google-api-python-client google-auth-httplib2 google-auth-oauthlib
 
-      - name: Run Downloader and Converter
+      - name: Run KRX Automation
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GDRIVE_SERVICE_ACCOUNT: ${{ secrets.GDRIVE_SERVICE_ACCOUNT }}
         run: python krx_brief.py
 
-      - name: Commit and Push
+      - name: Update Repository
+        # 생성된 PDF 및 JPG 파일을 저장소에 커밋하여 이력 관리
         run: |
           git config --global user.name "KRX Bot"
           git config --global user.email "bot@github.com"
-          if ls *.pdf 1> /dev/null 2>&1; then
+          if ls *.pdf 1> /dev/null 2>&1 || ls *.jpg 1> /dev/null 2>&1; then
             git add *.pdf *.jpg
             if git diff --staged --quiet; then
-              echo "No changes."
+              echo "Nothing to commit"
             else
-              git commit -m "Add latest brief and image"
+              git commit -m "Auto-update: Latest KRX Brief $(date +'%Y-%m-%d')"
               git push
             fi
           fi
