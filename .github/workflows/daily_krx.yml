@@ -1,0 +1,36 @@
+name: Daily KRX Brief Automation
+
+on:
+  schedule:
+    # 매일 평일 오후 5시 30분 실행 (UTC 08:30)
+    - cron: '30 8 * * 1-5'
+  workflow_dispatch: # 수동 실행 가능
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+
+      - name: Install dependencies
+        run: |
+          pip install requests beautifulsoup4
+
+      - name: Run Downloader
+        env:
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python krx_brief.py
+
+      - name: Commit and Push
+        run: |
+          git config --global user.name "KRX Bot"
+          git config --global user.email "bot@github.com"
+          git add *.pdf
+          git commit -m "Add daily brief: $(date +'%Y-%m-%d')"
+          git push
