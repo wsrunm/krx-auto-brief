@@ -13,7 +13,7 @@ from googleapiclient.http import MediaFileUpload
 GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY')
 GDRIVE_JSON = os.environ.get('GDRIVE_SERVICE_ACCOUNT')
 # 구글 드라이브 폴더 ID (폴더 주소창 마지막 문자열)
-GDRIVE_FOLDER_ID = "사용자의_구글드라이브_폴더_ID_입력" 
+GDRIVE_FOLDER_ID = "1RTldCqq_DfDwuxESYzzbqqgF--mBqxSF" 
 
 # Gemini 설정
 genai.configure(api_key=GEMINI_API_KEY)
