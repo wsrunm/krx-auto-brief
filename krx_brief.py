@@ -1,46 +1,52 @@
 import requests
-from bs4 import BeautifulSoup
 import os
 import datetime
+import re
 
-def download_latest_krx_brief():
-    target_url = "https://kind.krx.co.kr/marketnews/mktbrief.do?method=searchMktBriefList"
+def download_krx_brief():
+    # 1. 실제 데이터 요청 주소 (KRX 내부 검색 엔진)
+    api_url = "https://www.krx.co.kr/contents/COM/Search.jspx"
     
-    # 최근 30일간의 데이터를 검색하여 목록이 비어있지 않게 합니다.
+    # 2. "간행물 게시판의 목록을 달라"는 요청서 (핵심!)
     payload = {
-        'method': 'searchMktBriefList',
-        'currentPageSize': '15',
-        'pageIndex': '1',
-        'orderMode': '0',
-        'orderStat': 'D',
-        'fromDate': (datetime.datetime.now() - datetime.timedelta(days=30)).strftime("%Y-%m-%d"),
-        'toDate': datetime.datetime.now().strftime("%Y-%m-%d")
+        'id': 'SRCH02030100', # 간행물 게시판 고유 ID
+        'pagePath': '/contents/SRCH/02/02030100/SRCH02030100.jsp',
+        'code': '',
+        'pageSize': '1',      # 딱 맨 위 1개만 가져옴
+        'pageIndex': '1'
     }
     
-    try:
-        response = requests.post(target_url, data=payload)
-        soup = BeautifulSoup(response.text, 'html.parser')
-        
-        # 게시판에서 가장 첫 번째 행을 찾습니다.
-        first_row = soup.select_one('.tb_type01 tbody tr')
-        if not first_row or "조회 결과가 없습니다" in first_row.text:
-            print("게시물 없음: 최신 브리프를 찾을 수 없습니다.")
-            return None
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Referer': 'https://www.krx.co.kr/contents/SRCH/02/02030100/SRCH02030100.jsp'
+    }
 
-        # onclick 이벤트에서 docid 추출
-        anchor = first_row.select_one('a')
-        onclick_attr = anchor['onclick']
-        doc_id = onclick_attr.split("'")[1]
+    try:
+        # 데이터 목록 요청
+        response = requests.post(api_url, data=payload, headers=headers)
+        data = response.json() # KRX는 목록을 JSON 형식으로 줍니다.
+
+        # 3. 목록에서 가장 첫 번째 게시물의 파일 ID 추출
+        if not data.get('block1'):
+            print("게시물을 찾을 수 없습니다.")
+            return None
         
-        # 파일명 생성 (오늘 날짜가 아니라 게시물의 제목이나 ID를 활용)
-        file_name = f"KRX_Latest_Brief_{doc_id}.pdf"
+        # 최상단 게시물의 정보
+        first_post = data['block1'][0]
+        file_id = first_post['file_id'] # 파일 고유 번호
+        title = first_post['title']     # 게시물 제목
         
-        # 실제 다운로드 링크
-        download_url = f"https://kind.krx.co.kr/common/disclsDocDownload.do?method=download&docid={doc_id}"
+        print(f"최신 간행물 발견: {title}")
+
+        # 4. 실제 PDF 다운로드 경로 생성
+        download_url = f"https://www.krx.co.kr/contents/COM/GeneratePDF.jspx?u={file_id}"
         
-        file_res = requests.get(download_url)
+        file_name = f"KRX_Brief_{datetime.datetime.now().strftime('%Y%m%d')}.pdf"
+
+        # 파일 저장
+        pdf_res = requests.get(download_url, headers=headers)
         with open(file_name, 'wb') as f:
-            f.write(file_res.content)
+            f.write(pdf_res.content)
             
         print(f"다운로드 성공: {file_name}")
         return file_name
@@ -49,19 +55,16 @@ def download_latest_krx_brief():
         print(f"오류 발생: {e}")
         return None
 
+# 텔레그램 발송 부분은 이전과 동일합니다.
 def send_to_telegram(file_path):
     token = os.environ.get('TELEGRAM_TOKEN')
     chat_id = os.environ.get('TELEGRAM_CHAT_ID')
-    if not token or not chat_id:
-        print("텔레그램 설정이 없습니다.")
-        return
-
+    if not token or not chat_id: return
     url = f"https://api.telegram.org/bot{token}/sendDocument"
     with open(file_path, 'rb') as f:
-        res = requests.post(url, data={'chat_id': chat_id}, files={'document': f})
-        print(f"텔레그램 전송 결과: {res.status_code}")
+        requests.post(url, data={'chat_id': chat_id}, files={'document': f})
 
 if __name__ == "__main__":
-    brief_file = download_latest_krx_brief()
+    brief_file = download_krx_brief()
     if brief_file:
         send_to_telegram(brief_file)
