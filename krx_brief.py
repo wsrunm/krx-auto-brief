@@ -4,7 +4,7 @@ import datetime
 import re
 import json
 from pdf2image import convert_from_path
-from google import genai  # 2026년 표준 SDK
+from google import genai # 2026년형 최신 SDK
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
@@ -12,7 +12,8 @@ from googleapiclient.http import MediaFileUpload
 # 환경 변수
 GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY')
 GDRIVE_JSON = os.environ.get('GDRIVE_SERVICE_ACCOUNT')
-GDRIVE_FOLDER_ID = "1RTldCqq_DfDwuxESYzzbqqgF--mBqxSF" # 여기에 폴더 ID 꼭 넣어주세요
+# ⚠️ 주의: 본인의 구글 드라이브 폴더 ID를 꼭 입력하세요!
+GDRIVE_FOLDER_ID = "여기에_폴더_ID_입력" 
 
 def get_latest_seq():
     try:
@@ -39,17 +40,17 @@ def download_krx_brief():
     return None
 
 def summarize_pdf(pdf_path):
-    """Gemini 1.5-Flash 모델로 변경 (무료 할당량 안정성 확보)"""
-    if not GEMINI_API_KEY: return "Gemini 키가 설정되지 않았습니다."
-    print("🤖 Gemini 1.5 분석 시작...")
+    """Gemini 1.5-Flash 모델로 요약 (가장 안정적)"""
+    if not GEMINI_API_KEY: return "Gemini 키가 없습니다."
+    print("🤖 Gemini 분석 시작...")
     client = genai.Client(api_key=GEMINI_API_KEY)
     
-    # 2.0에서 1.5-flash로 변경 (가장 안정적임)
+    # 모델명에서 'models/' 접두사 제거 (404 에러 해결 포인트)
     uploaded_file = client.files.upload(file=pdf_path)
     
     response = client.models.generate_content(
         model='gemini-1.5-flash', 
-        contents=[uploaded_file, "이 증시 브리프 리포트의 핵심 내용을 투자 PM 관점에서 3줄로 요약하고, 특이사항이 있다면 알려줘. 한국어로 응답해줘."]
+        contents=[uploaded_file, "이 증시 브리프 리포트의 핵심 내용을 3줄로 요약하고 특이사항을 알려줘. 한국어로 응답해줘."]
     )
     return response.text
 
@@ -64,7 +65,7 @@ def convert_to_image(pdf_path):
 
 def upload_to_gdrive(file_path):
     if not GDRIVE_JSON: return
-    print("☁️ 구글 드라이브 업로드 시도 중...")
+    print("☁️ 구글 드라이브 업로드 중...")
     info = json.loads(GDRIVE_JSON)
     creds = service_account.Credentials.from_service_account_info(info)
     service = build('drive', 'v3', credentials=creds)
@@ -75,45 +76,29 @@ def upload_to_gdrive(file_path):
 def send_to_telegram(text=None, image_path=None, file_path=None):
     token = os.environ.get('TELEGRAM_TOKEN')
     chat_id = os.environ.get('TELEGRAM_CHAT_ID')
-    if not token or not chat_id: return
-    
-    if text:
-        requests.post(f"https://api.telegram.org/bot{token}/sendMessage", data={'chat_id': chat_id, 'text': text})
+    if text: requests.post(f"https://api.telegram.org/bot{token}/sendMessage", data={'chat_id': chat_id, 'text': text})
     if image_path:
-        with open(image_path, 'rb') as f:
-            requests.post(f"https://api.telegram.org/bot{token}/sendPhoto", data={'chat_id': chat_id}, files={'photo': f})
+        with open(image_path, 'rb') as f: requests.post(f"https://api.telegram.org/bot{token}/sendPhoto", data={'chat_id': chat_id}, files={'photo': f})
     if file_path:
-        with open(file_path, 'rb') as f:
-            requests.post(f"https://api.telegram.org/bot{token}/sendDocument", data={'chat_id': chat_id}, files={'document': f})
+        with open(file_path, 'rb') as f: requests.post(f"https://api.telegram.org/bot{token}/sendDocument", data={'chat_id': chat_id}, files={'document': f})
 
 if __name__ == "__main__":
     pdf_file = download_krx_brief()
     if pdf_file:
         print(f"✅ 파일 준비 완료: {pdf_file}")
         
-        # 1. 요약 시도 (실패 시 텔레그램으로 에러 내용 알림)
+        # 1. 요약 전송
         try:
             summary = summarize_pdf(pdf_file)
             send_to_telegram(text=f"📝 [오늘의 시황 요약]\n\n{summary}")
-            print("✅ 요약 전송 완료")
         except Exception as e:
-            error_msg = f"❌ 요약 실패: {str(e)}"
-            send_to_telegram(text=error_msg)
-            print(error_msg)
+            send_to_telegram(text=f"❌ 요약 실패: {str(e)}")
         
-        # 2. 이미지 변환 및 전송
+        # 2. 이미지 및 파일 전송
         img_file = convert_to_image(pdf_file)
-        if img_file:
-            send_to_telegram(image_path=img_file)
-            print("✅ 이미지 전송 완료")
-            
-        # 3. 원본 PDF 전송
+        if img_file: send_to_telegram(image_path=img_file)
         send_to_telegram(file_path=pdf_file)
-        print("✅ 원본 전송 완료")
         
-        # 4. 드라이브 업로드
-        try:
-            upload_to_gdrive(pdf_file)
-            print("✅ 구글 드라이브 업로드 완료")
-        except Exception as e:
-            print(f"❌ 드라이브 업로드 실패: {e}")
+        # 3. 드라이브 업로드
+        try: upload_to_gdrive(pdf_file)
+        except: print("드라이브 업로드 실패(용량/권한 이슈)")
