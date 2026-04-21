@@ -87,7 +87,7 @@ def summarize_pdf(pdf_path):
         # 2. 요약 요청 (모델명에서 'models/'를 제외한 'gemini-1.5-flash'만 사용)
         # 만약 1.5-flash가 계속 404라면 'gemini-2.0-flash'로 변경해 보세요.
         response = client.models.generate_content(
-            model='gemini-1.5-flash', 
+            model='gemini-2.0-flash', 
             contents=[
                 uploaded_file, 
                 "이 리포트의 핵심 내용을 PM의 관점에서 3줄 요약하고, 투자자가 주목해야 할 수치나 종목이 있다면 알려줘. 한국어로 응답해줘."
