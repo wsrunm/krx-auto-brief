@@ -13,6 +13,9 @@ TELEGRAM_CHAT_ID = os.environ.get('TELEGRAM_CHAT_ID')
 # Gemini 설정
 genai.configure(api_key=GEMINI_API_KEY)
 
+# 💡 1.5가 없다면 2.0-flash 혹은 현재 성공하신 2.5-flash를 사용합니다.
+model_name = 'models/gemini-2.0-flash' # 1.5가 없다면 2.0이 표준일 확률이 높습니다.
+
 def download_all_today_reports():
     """오늘 날짜의 01~99번 리포트를 전수 조사하여 다운로드합니다."""
     session = requests.Session()
@@ -54,9 +57,7 @@ def summarize_all_in_one(file_paths):
     """분당 5회 제한(RPM 5)을 칼같이 지키는 거북이 요약 로직"""
     if not file_paths: return "파일이 없습니다."
     
-    # 💡 1.5가 없다면 2.0-flash 혹은 현재 성공하신 2.5-flash를 사용합니다.
-    model_name = 'models/gemini-2.0-flash' # 1.5가 없다면 2.0이 표준일 확률이 높습니다.
-    
+
     try:
         print(f"🤖 모델 [{model_name}]으로 분석 준비...")
         client = genai.GenerativeModel(model_name)
@@ -115,6 +116,36 @@ def send_to_telegram(text=None, image_path=None, file_path=None):
     except Exception as e:
         print(f"❌ 텔레그램 전송 중 오류: {e}")
 
+def generate_deep_research():
+    # market_data에는 당일 등락률, 거래대금, 상위 섹터 정보 등을 문자열로 전달
+    prompt = f"""
+    너는 20년 경력의 수석 주식 애널리스트야. 제공된 데이터를 분석하여 '딥리서치 시장 요약'을 작성해줘.
+    형식은 반드시 아래를 지켜줘:
+
+    📊 [오늘의 시장 분석 딥리서치]
+    - 날짜: (리포트의 날짜)
+    
+    ■ 시장 핵심 요약
+    - (코스피/코스닥 주요 흐름 2~3줄)
+    
+    🚀 핵심 키워드 및 테마
+    - (주요 섹터명과 핵심 이유를 이모지와 함께 3~4개 작성)
+    
+    🔥 테마별 상세 분석 (가장 중요한 테마 2~3개)
+    【테마명】 - (이유/모멘텀)
+    - [대장주] 종목명 : (상승 이유 및 분석 내용)
+    - 관련주 : (나열)
+    
+    ⚡ 투자자 관점 포인트
+    - (내일 장 대응 전략 1~2줄)
+    
+    반드시 한국어로, 전문적이고 가독성 있게 작성해줘.
+
+    """
+    
+    response = model_name.generate_content(prompt)
+    return response.text
+
 if __name__ == "__main__":
     # 1. 파일 다운로드
     reports = download_all_today_reports()
@@ -140,3 +171,6 @@ if __name__ == "__main__":
             time.sleep(1)
     else:
         print("📭 오늘 올라온 리포트가 없습니다.")
+        
+    g_report = generate_deep_research(raw_data)
+    send_to_telegram(g_report)
