@@ -52,9 +52,9 @@ def summarize_all_in_one(file_paths):
         return "요약 기능이 비활성화되었거나 파일이 없습니다."
 
     # 사용 가능한 모델 목록 출력
-for m in genai.list_models():
-    if 'generateContent' in m.supported_generation_methods:
-        print(m.name)
+    for m in genai.list_models():
+        if 'generateContent' in m.supported_generation_methods:
+            print(m.name)
         
     try:
         # 파일 업로드 (여기서 에러가 나도 catch해서 조용히 넘깁니다)
