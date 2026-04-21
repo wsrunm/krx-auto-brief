@@ -29,11 +29,11 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y poppler-utils fonts-nanum
-          
+
       - name: Install Python Packages
         run: |
-          pip install requests beautifulsoup4 pdf2image google-genai google-api-python-client google-auth-httplib2 google-auth-oauthlib
-
+          # google-genai 대신 google-generativeai를 설치합니다. (더 안정적임)
+          pip install requests beautifulsoup4 pdf2image google-generativeai
       - name: Run KRX Automation
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
