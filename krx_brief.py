@@ -64,7 +64,7 @@ def summarize_all_in_one(file_paths):
                 print(m.name)
                 
         # 모델 호출 (v1beta 404를 피하기 위해 가장 기본 모델명 사용)
-        model = genai.GenerativeModel('models/gemini-1.5-flash-latest')
+        model = genai.GenerativeModel('models/gemini-2.5-flash')
         
         prompt = "첨부된 리포트들을 종합하여 핵심 내용을 한국어로 3줄 요약해줘."
         response = model.generate_content([prompt] + uploaded_files)
