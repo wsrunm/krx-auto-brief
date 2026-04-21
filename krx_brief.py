@@ -172,5 +172,5 @@ if __name__ == "__main__":
     else:
         print("📭 오늘 올라온 리포트가 없습니다.")
         
-    g_report = generate_deep_research(raw_data)
+    g_report = generate_deep_research()
     send_to_telegram(g_report)
