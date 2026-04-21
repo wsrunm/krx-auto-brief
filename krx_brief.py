@@ -172,5 +172,5 @@ if __name__ == "__main__":
     else:
         print("📭 오늘 올라온 리포트가 없습니다.")
         
-    g_report = generate_deep_research()
-    send_to_telegram(text=f"📊 [오늘의 주도주]\n\n{g_report}")
+    #g_report = generate_deep_research()
+    #send_to_telegram(text=f"📊 [오늘의 주도주]\n\n{g_report}")
