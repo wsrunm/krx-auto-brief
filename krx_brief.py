@@ -50,7 +50,12 @@ def summarize_all_in_one(file_paths):
     """요약에 실패해도 전체 흐름에 지장을 주지 않는 안전 버전"""
     if not GEMINI_API_KEY or not file_paths:
         return "요약 기능이 비활성화되었거나 파일이 없습니다."
-    
+
+    # 사용 가능한 모델 목록 출력
+for m in genai.list_models():
+    if 'generateContent' in m.supported_generation_methods:
+        print(m.name)
+        
     try:
         # 파일 업로드 (여기서 에러가 나도 catch해서 조용히 넘깁니다)
         uploaded_files = []
@@ -59,7 +64,7 @@ def summarize_all_in_one(file_paths):
             uploaded_files.append(f)
         
         # 모델 호출 (v1beta 404를 피하기 위해 가장 기본 모델명 사용)
-        model = genai.GenerativeModel('gemini-1.5-flash')
+        model = genai.GenerativeModel('models/gemini-1.5-flash-latest')
         
         prompt = "첨부된 리포트들을 종합하여 핵심 내용을 한국어로 3줄 요약해줘."
         response = model.generate_content([prompt] + uploaded_files)
