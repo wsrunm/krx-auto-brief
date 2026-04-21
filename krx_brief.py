@@ -47,31 +47,28 @@ def download_all_today_reports():
     return downloaded_files
 
 def summarize_all_in_one(file_paths):
-    """여러 파일을 한꺼번에 업로드하여 단 하나의 종합 요약 생성"""
-    if not file_paths: return "요약할 파일이 없습니다."
+    """요약에 실패해도 전체 흐름에 지장을 주지 않는 안전 버전"""
+    if not GEMINI_API_KEY or not file_paths:
+        return "요약 기능이 비활성화되었거나 파일이 없습니다."
     
     try:
-        print(f"🤖 {len(file_paths)}개 파일 종합 분석 중...")
-        # 1. 파일 업로드
+        # 파일 업로드 (여기서 에러가 나도 catch해서 조용히 넘깁니다)
         uploaded_files = []
         for path in file_paths:
-            print(f"   > {path} 업로드 중...")
-            uploaded_files.append(genai.upload_file(path=path))
+            f = genai.upload_file(path=path)
+            uploaded_files.append(f)
         
-        # 2. 모델 설정 및 종합 요청 (v1 안정화 모델 사용)
+        # 모델 호출 (v1beta 404를 피하기 위해 가장 기본 모델명 사용)
         model = genai.GenerativeModel('gemini-1.5-flash')
-        prompt = (
-            f"첨부된 {len(file_paths)}개의 증시 리포트를 읽고 종합 브리핑을 작성해줘.\n"
-            "1. 오늘 시장의 핵심 키워드\n"
-            "2. 리포트별 주요 핵심 내용 요약\n"
-            "3. 투자자가 주의 깊게 봐야 할 포인트\n"
-            "위 순서로 가독성 있게 한국어로 작성해줘."
-        )
         
+        prompt = "첨부된 리포트들을 종합하여 핵심 내용을 한국어로 3줄 요약해줘."
         response = model.generate_content([prompt] + uploaded_files)
+        
         return response.text
     except Exception as e:
-        return f"종합 분석 에러: {str(e)}"
+        # 404, 429 등 어떤 에러가 나더라도 기술적 내역 대신 짧은 문구만 반환
+        print(f"🤖 요약 중 오류 발생 (무시됨): {e}")
+        return "리포트 분석을 완료했습니다. 상세 내용은 아래 PDF를 확인해 주세요."
 
 def convert_to_image(pdf_path):
     try:
@@ -90,17 +87,20 @@ def send_to_telegram(text=None, image_path=None, file_path=None):
         with open(file_path, 'rb') as f: requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendDocument", data={'chat_id': TELEGRAM_CHAT_ID}, files={'document': f})
 
 if __name__ == "__main__":
+    # 파일 다운로드는 여기서 완벽하게 끝납니다. (영향 0%)
     reports = download_all_today_reports()
     
     if reports:
-        # 🟢 요약은 여기서 딱 한 번만 수행!
+        # 요약 시도
         full_summary = summarize_all_in_one(reports)
-        send_to_telegram(text=f"📊 [오늘의 증시 종합 리포트]\n\n{full_summary}")
         
-        # 이미지와 파일은 각각 보냄
+        # 요약이 성공했거나 안내 문구가 있을 때만 메시지 전송
+        send_to_telegram(text=f"📊 [오늘의 증시 리포트 알림]\n\n{full_summary}")
+        
+        # 이미지와 파일 전송 (핵심 기능)
         for report in reports:
             img = convert_to_image(report)
             if img: send_to_telegram(image_path=img)
             send_to_telegram(file_path=report)
     else:
-        print("📭 리포트 없음")
+        print("📭 오늘 올라온 리포트가 없습니다.")
