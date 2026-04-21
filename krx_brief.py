@@ -51,24 +51,40 @@ def download_all_today_reports():
     return downloaded_files
 
 def summarize_all_in_one(file_paths):
-    """여러 파일을 종합하여 한 번에 요약합니다."""
-    if not file_paths: return "요약할 파일이 없습니다."
+    """분당 5회 제한(RPM 5)을 칼같이 지키는 거북이 요약 로직"""
+    if not file_paths: return "파일이 없습니다."
+    
+    # 💡 1.5가 없다면 2.0-flash 혹은 현재 성공하신 2.5-flash를 사용합니다.
+    model_name = 'models/gemini-2.0-flash' # 1.5가 없다면 2.0이 표준일 확률이 높습니다.
     
     try:
-        print(f"🤖 {len(file_paths)}개 파일 종합 분석 중...")
+        print(f"🤖 모델 [{model_name}]으로 분석 준비...")
+        client = genai.GenerativeModel(model_name)
+        
         uploaded_files = []
         for path in file_paths:
+            print(f"   > {path} 업로드 중... (제한 방지를 위해 15초 대기)")
             f = genai.upload_file(path=path)
             uploaded_files.append(f)
-        
-        # 사용자님이 성공하신 2.5-flash 모델 사용
-        model = genai.GenerativeModel('models/gemini-2.5-flash')
-        prompt = "제공된 리포트들을 종합하여 핵심 내용을 한국어로 3줄 요약해줘."
-        
-        response = model.generate_content([prompt] + uploaded_files)
+            # 💡 핵심: 분당 5회 제한이므로, 파일 하나당 15초씩 쉽니다.
+            time.sleep(15) 
+
+        # 💡 요약 요청 전에도 충분히 휴식
+        print("⏳ 마지막 요청 전 15초 추가 대기...")
+        time.sleep(15)
+
+        # 요약 생성 시도
+        prompt = "제공된 리포트들을 한국어로 3줄 요약하고 핵심 수치를 알려줘."
+        response = client.generate_content([prompt] + uploaded_files)
         return response.text
+
     except Exception as e:
-        return f"요약 중 오류 발생: {str(e)}"
+        error_msg = str(e)
+        if "404" in error_msg:
+            return "❌ 모델명을 찾을 수 없습니다. list_models()로 확인된 이름을 넣어주세요."
+        if "429" in error_msg:
+            return "⚠️ 아직도 쿼터가 부족합니다. 대기 시간을 20초로 더 늘려야 할 것 같습니다."
+        return f"분석 오류: {error_msg}"
 
 def convert_to_image(pdf_path):
     """PDF 첫 페이지를 JPG 이미지로 변환합니다."""
