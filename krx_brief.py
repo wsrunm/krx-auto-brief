@@ -72,18 +72,52 @@ def download_all_today_reports():
     return downloaded_files
 
 def summarize_pdf(pdf_path):
-    """Gemini 1.5-Flash를 이용한 심층 요약"""
+    """Gemini 요약 에러(404) 해결 버전"""
     if not GEMINI_API_KEY: return "Gemini 키 미설정"
+    
+    print(f"🤖 {pdf_path} 분석 및 요약 중...")
+    
+    # 2026년 최신 SDK에서는 명시적으로 Client를 생성합니다.
     client = genai.Client(api_key=GEMINI_API_KEY)
+    
     try:
+        # 1. 파일 업로드
         uploaded_file = client.files.upload(file=pdf_path)
+        
+        # 2. 요약 요청 (모델명에서 'models/'를 제외한 'gemini-1.5-flash'만 사용)
+        # 만약 1.5-flash가 계속 404라면 'gemini-2.0-flash'로 변경해 보세요.
         response = client.models.generate_content(
-            model='gemini-1.5-flash',
-            contents=[uploaded_file, "이 리포트의 핵심 주제와 주요 수치, 투자 시사점을 한국어로 요약해줘."]
+            model='gemini-1.5-flash', 
+            contents=[
+                uploaded_file, 
+                "이 리포트의 핵심 내용을 PM의 관점에서 3줄 요약하고, 투자자가 주목해야 할 수치나 종목이 있다면 알려줘. 한국어로 응답해줘."
+            ]
         )
-        return response.text
+        
+        # 응답 텍스트 반환
+        if response and response.text:
+            return response.text
+        else:
+            return "요약 결과가 비어 있습니다."
+
     except Exception as e:
-        return f"분석 에러: {str(e)}"
+        # 에러 메시지 분석 및 출력
+        error_str = str(e)
+        print(f"❌ 요약 실패 상세: {error_str}")
+        
+        # 404 에러 발생 시 모델명을 'gemini-2.0-flash'로 자동 전환 시도 (Fallback)
+        if "404" in error_str:
+            print("🔄 404 에러 감지: 2.0 모델로 재시도합니다...")
+            try:
+                response = client.models.generate_content(
+                    model='gemini-2.0-flash',
+                    contents=[uploaded_file, "이 리포트를 3줄 요약해줘."]
+                )
+                return response.text
+            except:
+                return f"모델을 찾을 수 없습니다. (API 설정 확인 필요): {error_str}"
+        
+        return f"분석 에러: {error_str}"
 
 def convert_to_image(pdf_path):
     try:
