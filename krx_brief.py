@@ -71,52 +71,61 @@ def download_all_today_reports():
     print(f"🏁 탐색 종료. 총 {len(downloaded_files)}개의 파일을 확보했습니다.")
     return downloaded_files
 
-def summarize_pdf(pdf_path):
-    """Gemini 요약 에러(404) 해결 버전"""
+def summarize_all_pdfs(pdf_paths):
+    """여러 개의 PDF를 한꺼번에 읽어 종합 요약 생성"""
     if not GEMINI_API_KEY: return "Gemini 키 미설정"
+    if not pdf_paths: return "요약할 파일이 없습니다."
     
-    print(f"🤖 {pdf_path} 분석 및 요약 중...")
-    
-    # 2026년 최신 SDK에서는 명시적으로 Client를 생성합니다.
+    print(f"🤖 총 {len(pdf_paths)}개의 리포트 종합 분석 중...")
     client = genai.Client(api_key=GEMINI_API_KEY)
     
     try:
-        # 1. 파일 업로드
-        uploaded_file = client.files.upload(file=pdf_path)
+        # 1. 모든 파일을 업로드하여 리스트로 만듭니다.
+        uploaded_files = []
+        for path in pdf_paths:
+            print(f"   > {path} 업로드 중...")
+            uploaded_files.append(client.files.upload(file=path))
         
-        # 2. 요약 요청 (모델명에서 'models/'를 제외한 'gemini-1.5-flash'만 사용)
-        # 만약 1.5-flash가 계속 404라면 'gemini-2.0-flash'로 변경해 보세요.
-        response = client.models.generate_content(
-            model='gemini-2.0-flash', 
-            contents=[
-                uploaded_file, 
-                "이 리포트의 핵심 내용을 PM의 관점에서 3줄 요약하고, 투자자가 주목해야 할 수치나 종목이 있다면 알려줘. 한국어로 응답해줘."
-            ]
+        # 2. 모든 파일 객체와 함께 종합 요약 프롬프트를 보냅니다.
+        # contents 리스트에 업로드된 모든 파일과 질문을 한꺼번에 담습니다.
+        prompt = (
+            f"제공된 {len(pdf_paths)}개의 증시 리포트를 모두 읽고, "
+            "전체적인 시장 상황을 관통하는 핵심 내용을 '종합 브리핑' 형태로 작성해줘. "
+            "1. 시장 전체 요약, 2. 주요 종목 및 수치, 3. 투자자 대응 전략 순으로 "
+            "가독성 좋게 한국어로 정리해줘."
         )
         
-        # 응답 텍스트 반환
-        if response and response.text:
-            return response.text
-        else:
-            return "요약 결과가 비어 있습니다."
+        response = client.models.generate_content(
+            model='gemini-1.5-flash',
+            contents=uploaded_files + [prompt]
+        )
+        
+        return response.text
 
     except Exception as e:
-        # 에러 메시지 분석 및 출력
+        return f"종합 분석 에러: {str(e)}"
+
+def summarize_pdf(pdf_path):
+    """Gemini 1.5-flash 고정 및 429 에러 대응 버전"""
+    if not GEMINI_API_KEY: return "Gemini 키 미설정"
+    
+    print(f"🤖 {pdf_path} 요약 시도 중...")
+    client = genai.Client(api_key=GEMINI_API_KEY)
+    
+    try:
+        uploaded_file = client.files.upload(file=pdf_path)
+        
+        # 무료 티어에서 가장 안정적인 1.5-flash 사용
+        response = client.models.generate_content(
+            model='gemini-1.5-flash', 
+            contents=[uploaded_file, "이 리포트를 3줄 요약하고 핵심 수치를 알려줘. 한국어로 응답해줘."]
+        )
+        return response.text
+
+    except Exception as e:
         error_str = str(e)
-        print(f"❌ 요약 실패 상세: {error_str}")
-        
-        # 404 에러 발생 시 모델명을 'gemini-2.0-flash'로 자동 전환 시도 (Fallback)
-        if "404" in error_str:
-            print("🔄 404 에러 감지: 2.0 모델로 재시도합니다...")
-            try:
-                response = client.models.generate_content(
-                    model='gemini-2.0-flash',
-                    contents=[uploaded_file, "이 리포트를 3줄 요약해줘."]
-                )
-                return response.text
-            except:
-                return f"모델을 찾을 수 없습니다. (API 설정 확인 필요): {error_str}"
-        
+        if "429" in error_str:
+            return "⚠️ 요약 실패: 구글 API 요청 제한 초과 (잠시 후 다시 시도해 주세요)."
         return f"분석 에러: {error_str}"
 
 def convert_to_image(pdf_path):
@@ -140,20 +149,21 @@ def send_to_telegram(text=None, image_path=None, file_path=None):
             requests.post(f"https://api.telegram.org/bot{token}/sendDocument", data={'chat_id': chat_id}, files={'document': f})
 
 if __name__ == "__main__":
-    # 1. 오늘자 모든 리포트 긁어오기
     reports = download_all_today_reports()
     
     if reports:
         for report in reports:
-            # 2. 요약 및 전송
+            # 1. 요약 전송
             summary = summarize_pdf(report)
-            send_to_telegram(text=f"📊 [신규 리포트 감지: {report}]\n\n{summary}")
+            send_to_telegram(text=f"📊 [리포트 요약: {report}]\n\n{summary}")
             
-            # 3. 첫 페이지 이미지 전송
+            # 2. 이미지 및 파일 전송
             img = convert_to_image(report)
             if img: send_to_telegram(image_path=img)
-            
-            # 4. 원본 파일 전송
             send_to_telegram(file_path=report)
+            
+            # 💡 [핵심] 다음 리포트 처리 전 10초간 휴식 (429 에러 방지)
+            print(f"⏳ 다음 파일 처리를 위해 10초 대기 중...")
+            time.sleep(10) 
     else:
-        print("📭 오늘 날짜로 생성된 리포트가 없습니다.")
+        print("📭 오늘 날짜 리포트 없음")
