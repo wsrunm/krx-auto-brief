@@ -61,7 +61,7 @@ def summarize_all_in_one(file_paths):
     try:
         # 파일 업로드 (여기서 에러가 나도 catch해서 조용히 넘깁니다)
         uploaded_files = []
-        for path in file_paths[:2]:
+        for path in file_paths[]:
             f = genai.upload_file(path=path)
             uploaded_files.append(f)
         
