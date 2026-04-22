@@ -75,7 +75,7 @@ def summarize_all_in_one(file_paths):
     except Exception as e:
         # 404, 429 등 어떤 에러가 나더라도 기술적 내역 대신 짧은 문구만 반환
         print(f"🤖 요약 중 오류 발생 (무시됨): {e}")
-        return "리포트 분석을 완료했습니다. 상세 내용은 아래 PDF를 확인해 주세요.
+        return "리포트 분석을 완료했습니다. 상세 내용은 아래 PDF를 확인해 주세요."
     
     """분당 5회 제한(RPM 5)을 칼같이 지키는 거북이 요약 로직"""
     """if not file_paths: return "파일이 없습니다."
