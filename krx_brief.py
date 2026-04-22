@@ -76,39 +76,6 @@ def summarize_all_in_one(file_paths):
         # 404, 429 등 어떤 에러가 나더라도 기술적 내역 대신 짧은 문구만 반환
         print(f"🤖 요약 중 오류 발생 (무시됨): {e}")
         return "리포트 분석을 완료했습니다. 상세 내용은 아래 PDF를 확인해 주세요."
-    
-    """분당 5회 제한(RPM 5)을 칼같이 지키는 거북이 요약 로직"""
-    """if not file_paths: return "파일이 없습니다."
-    
-
-    try:
-        print(f"🤖 모델 [{model_name}]으로 분석 준비...")
-        client = genai.GenerativeModel(model_name)
-        
-        uploaded_files = []
-        for path in file_paths:
-            print(f"   > {path} 업로드 중... (제한 방지를 위해 15초 대기)")
-            f = genai.upload_file(path=path)
-            uploaded_files.append(f)
-            # 💡 핵심: 분당 5회 제한이므로, 파일 하나당 15초씩 쉽니다.
-            time.sleep(15) 
-
-        # 💡 요약 요청 전에도 충분히 휴식
-        print("⏳ 마지막 요청 전 15초 추가 대기...")
-        time.sleep(15)
-
-        # 요약 생성 시도
-        prompt = "제공된 리포트들을 한국어로 3줄 요약하고 핵심 수치를 알려줘."
-        response = client.generate_content([prompt] + uploaded_files)
-        return response.text
-
-    except Exception as e:
-        error_msg = str(e)
-        if "404" in error_msg:
-            return "❌ 모델명을 찾을 수 없습니다. list_models()로 확인된 이름을 넣어주세요."
-        if "429" in error_msg:
-            return "⚠️ 아직도 쿼터가 부족합니다. 대기 시간을 20초로 더 늘려야 할 것 같습니다."
-        return f"분석 오류: {error_msg}""""
 
 def convert_to_image(pdf_path):
     """PDF 첫 페이지를 JPG 이미지로 변환합니다."""
