@@ -67,10 +67,10 @@ def summarize_all_in_one(file_paths):
         model = genai.GenerativeModel('models/gemini-2.5-flash')
         
         # 💡 토큰 소모를 최소화하는 경량 프롬프트
-        prompt = "제공된 리포트에서 1. 시장 특징 2. 주도 테마 3. 핵심 종목만 불렛 포인트로 짧게 요약해줘."
+        prompt = "첨부된 리포트들을 종합하여 핵심 내용을 한국어로 3줄 요약해줘" # "제공된 리포트에서 1. 시장 특징 2. 주도 테마 3. 핵심 종목만 불렛 포인트로 짧게 요약해줘."
         
         # 쿼터 초기화를 위한 대기 후 요청
-        time.sleep(20)
+        # time.sleep(20)
         response = model.generate_content([prompt] + uploaded_files)
         return response.text
     except Exception as e:
