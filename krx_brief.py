@@ -93,23 +93,6 @@ def summarize_all_in_one(file_paths):
             return "⚠️ API 쿼터 초과로 상세 분석이 제한되었습니다. 아래 PDF를 참고해 주세요."
         return f"🤖 분석 중 오류 발생: {str(e)}"
 
-if __name__ == "__main__":
-    reports = download_all_today_reports()
-    
-    if reports:
-        # 1. 요약은 상위 2개 파일로만 진행 (딥리서치 시도)
-        full_summary = summarize_all_in_one(reports)
-        send_to_telegram(text=f"📊 [오늘의 증시 딥리서치]\n\n{full_summary}")
-        
-        # 2. 파일 전송은 '코넥스'를 포함한 3개 모두 전송 (사용자 확인용)
-        for report in reports:
-            img = convert_to_image(report)
-            if img: send_to_telegram(image_path=img)
-            send_to_telegram(file_path=report)
-            time.sleep(2)
-    else:
-        print("📭 리포트 없음")
-        
 def convert_to_image(pdf_path):
     """PDF 첫 페이지를 JPG 이미지로 변환합니다."""
     try:
