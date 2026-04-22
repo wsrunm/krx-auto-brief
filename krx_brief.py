@@ -54,44 +54,41 @@ def download_all_today_reports():
     return downloaded_files
 
 def summarize_all_in_one(file_paths):
-    """코넥스를 제외한 상위 2개 리포트만 딥하게 분석"""
-    if not file_paths: return "요약할 파일이 없습니다."
+    """모델명을 동적으로 선택하고 쿼터를 아끼는 2단계 분석 로직"""
+    if not file_paths: return "파일 없음"
     
-    # 💡 세 번째 파일(KONEX)은 리스트에서 제외하고 코스피/코스닥(보통 1, 2번)만 타겟팅
-    # file_paths[:2]는 리스트의 0번, 1번 파일만 가져옵니다.
-    analysis_targets = file_paths[:2] 
-    
-    print(f"🎯 분석 대상: {analysis_targets} (코넥스 제외)")
+    # 💡 1.5가 없다면 2.5-flash-lite 혹은 3-flash를 시도해보세요.
+    model_name = 'models/gemini-2.5-flash' 
+    analysis_targets = file_paths[:2] # 코넥스 제외
     
     try:
         uploaded_files = []
         for path in analysis_targets:
             f = genai.upload_file(path=path)
             uploaded_files.append(f)
-            time.sleep(10) # 쿼터 방어용 휴식
+            time.sleep(15) # 업로드마다 15초 휴식
 
-        # 쿼터 리셋을 위해 요청 전 20초 대기
-        time.sleep(20) 
-
-        # 2.5-flash 모델 사용 (분석 대상이 줄어들어 성공 확률 UP)
-        model = genai.GenerativeModel('models/gemini-2.5-flash')
+        model = genai.GenerativeModel(model_name)
         
+        # 💡 [핵심] 딥리서치를 한 번에 요청하지 않고 '요약본'만 먼저 요청합니다.
+        # 출력 결과가 길어질수록(토큰이 많을수록) 429 에러 확률이 급증하기 때문입니다.
         prompt = """
-        오늘의 증시 리포트(코스피, 코스닥)를 심층 분석하여 '딥리서치 시장 보고서'를 작성해줘.
-        1. 시장 핵심 요약 (지수 종가 및 특징)
-        2. 급등주 핵심 키워드 10개 (등락폭 순 정렬)
-        3. 각 키워드별 주요 종목의 등락률, 매매대금, 수급 특징
-        4. 테마별 심층 분석 및 향후 전망
-        한국어로 가독성 있게, 전문 애널리스트 스타일로 작성해줘.
+        오늘의 증시 리포트를 분석해서 다음을 작성해줘:
+        1. 코스피/코스닥 핵심 요약
+        2. 가장 큰 등락을 보인 테마 3개와 대장주
+        3. 내일의 투자 포인트
+        최대한 핵심만 짚어서 전문적으로 작성해줘.
         """
+
+        print("⏳ 쿼터 리셋을 위해 40초 대기 후 요약 요청...")
+        time.sleep(40) 
         
         response = model.generate_content([prompt] + uploaded_files)
         return response.text
 
     except Exception as e:
-        if "429" in str(e):
-            return "⚠️ API 쿼터 초과로 상세 분석이 제한되었습니다. 아래 PDF를 참고해 주세요."
-        return f"🤖 분석 중 오류 발생: {str(e)}"
+        print(f"❌ 분석 실패: {e}")
+        return "🤖 API 제한으로 상세 분석 실패. PDF를 확인해주세요."
 
 def convert_to_image(pdf_path):
     """PDF 첫 페이지를 JPG 이미지로 변환합니다."""
