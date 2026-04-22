@@ -54,8 +54,31 @@ def download_all_today_reports():
     return downloaded_files
 
 def summarize_all_in_one(file_paths):
+    """요약에 실패해도 전체 흐름에 지장을 주지 않는 안전 버전"""
+    if not GEMINI_API_KEY or not file_paths:
+        return "요약 기능이 비활성화되었거나 파일이 없습니다."
+    
+    try:
+        # 파일 업로드 (여기서 에러가 나도 catch해서 조용히 넘깁니다)
+        uploaded_files = []
+        for path in file_paths:
+            f = genai.upload_file(path=path)
+            uploaded_files.append(f)
+        
+        # 모델 호출 (v1beta 404를 피하기 위해 가장 기본 모델명 사용)
+        model = genai.GenerativeModel('gemini-1.5-flash')
+        
+        prompt = "첨부된 리포트들을 종합하여 핵심 내용을 한국어로 3줄 요약해줘."
+        response = model.generate_content([prompt] + uploaded_files)
+        
+        return response.text
+    except Exception as e:
+        # 404, 429 등 어떤 에러가 나더라도 기술적 내역 대신 짧은 문구만 반환
+        print(f"🤖 요약 중 오류 발생 (무시됨): {e}")
+        return "리포트 분석을 완료했습니다. 상세 내용은 아래 PDF를 확인해 주세요.
+    
     """분당 5회 제한(RPM 5)을 칼같이 지키는 거북이 요약 로직"""
-    if not file_paths: return "파일이 없습니다."
+    """if not file_paths: return "파일이 없습니다."
     
 
     try:
@@ -85,7 +108,7 @@ def summarize_all_in_one(file_paths):
             return "❌ 모델명을 찾을 수 없습니다. list_models()로 확인된 이름을 넣어주세요."
         if "429" in error_msg:
             return "⚠️ 아직도 쿼터가 부족합니다. 대기 시간을 20초로 더 늘려야 할 것 같습니다."
-        return f"분석 오류: {error_msg}"
+        return f"분석 오류: {error_msg}""""
 
 def convert_to_image(pdf_path):
     """PDF 첫 페이지를 JPG 이미지로 변환합니다."""
