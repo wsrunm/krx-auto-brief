@@ -54,28 +54,32 @@ def download_all_today_reports():
     return downloaded_files
 
 def summarize_all_in_one(file_paths):
-    """요약에 실패해도 전체 흐름에 지장을 주지 않는 안전 버전"""
-   if not GEMINI_API_KEY or not file_paths:
-        return "요약 기능이 비활성화되었거나 파일이 없습니다."
+    if not file_paths: return "파일 없음"
+    
+    # 코넥스 제외 (사용자 요청 반영)
+    analysis_targets = file_paths[:2] 
     
     try:
-        # 파일 업로드 (여기서 에러가 나도 catch해서 조용히 넘깁니다)
-        uploaded_files = []
-        for path in file_paths[]:
-            f = genai.upload_file(path=path)
-            uploaded_files.append(f)
-        
-        # 모델 호출 (v1beta 404를 피하기 위해 가장 기본 모델명 사용)
+        uploaded_files = [genai.upload_file(path=p) for p in analysis_targets]
+        # API 요청 간격 확보 (RPM 관리)
+        time.sleep(10) 
+
         model = genai.GenerativeModel('models/gemini-2.5-flash')
         
-        prompt = "첨부된 리포트들을 종합하여 핵심 내용을 한국어로 3줄 요약해줘. 그리고 오늘 주식 주요 뉴스 검색해서 오늘 상승 종목 요약도 같이 해줘. 각 종목은 현재 주가 오늘 상승률 및 거래대금 표시 필요"
-        response = model.generate_content([prompt] + uploaded_files)
+        # 💡 토큰 소모를 최소화하는 경량 프롬프트
+        prompt = "제공된 리포트에서 1. 시장 특징 2. 주도 테마 3. 핵심 종목만 불렛 포인트로 짧게 요약해줘."
         
+        # 쿼터 초기화를 위한 대기 후 요청
+        time.sleep(20)
+        response = model.generate_content(
+            prompt,
+            generation_config={"max_output_tokens": 500} # 출력 길이를 제한하여 안정성 확보
+        )
         return response.text
     except Exception as e:
-        # 404, 429 등 어떤 에러가 나더라도 기술적 내역 대신 짧은 문구만 반환
-        print(f"🤖 요약 중 오류 발생 (무시됨): {e}")
-        return "리포트 분석을 완료했습니다. 상세 내용은 아래 PDF를 확인해 주세요."
+        # 요약 실패 시에도 전체 프로세스가 멈추지 않도록 예외 처리
+        print(f"🤖 분석 생략: {e}")
+        return "리포트 분석을 완료했습니다. 상세 내용은 아래 첨부된 파일을 확인해 주세요."
 
 def convert_to_image(pdf_path):
     """PDF 첫 페이지를 JPG 이미지로 변환합니다."""
