@@ -71,10 +71,7 @@ def summarize_all_in_one(file_paths):
         
         # 쿼터 초기화를 위한 대기 후 요청
         time.sleep(20)
-        response = model.generate_content(
-            prompt,
-            generation_config={"max_output_tokens": 500} # 출력 길이를 제한하여 안정성 확보
-        )
+        response = model.generate_content([prompt] + uploaded_files)
         return response.text
     except Exception as e:
         # 요약 실패 시에도 전체 프로세스가 멈추지 않도록 예외 처리
