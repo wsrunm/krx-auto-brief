@@ -54,57 +54,61 @@ def download_all_today_reports():
     return downloaded_files
 
 def summarize_all_in_one(file_paths):
-    """429 에러를 피하기 위해 극단적으로 천천히 작동하는 요약 함수"""
-    if not file_paths: return "파일이 없습니다."
+    """코넥스를 제외한 상위 2개 리포트만 딥하게 분석"""
+    if not file_paths: return "요약할 파일이 없습니다."
     
-    # 💡 [필독] 만약 1.5-flash가 없다면 아래 목록 중 하나씩 바꿔보세요.
-    # 1순위: models/gemini-1.5-flash-8b (쿼터 제일 많음)
-    # 2순위: models/gemini-1.5-flash
-    # 3순위: models/gemini-2.0-flash
-    model_name = 'models/gemini-1.5-flash-8b' 
+    # 💡 세 번째 파일(KONEX)은 리스트에서 제외하고 코스피/코스닥(보통 1, 2번)만 타겟팅
+    # file_paths[:2]는 리스트의 0번, 1번 파일만 가져옵니다.
+    analysis_targets = file_paths[:2] 
+    
+    print(f"🎯 분석 대상: {analysis_targets} (코넥스 제외)")
     
     try:
-        print(f"🤖 [{model_name}] 모델로 조심스럽게 분석을 시작합니다...")
-        
         uploaded_files = []
-        for path in file_paths:
-            print(f"   > {path} 업로드 중...")
+        for path in analysis_targets:
             f = genai.upload_file(path=path)
             uploaded_files.append(f)
-            # 파일 하나 올릴 때마다 15초씩 쉽니다 (요청 분산)
-            time.sleep(15) 
+            time.sleep(10) # 쿼터 방어용 휴식
 
-        # 💡 모든 파일 업로드 후, 요약 요청 전 30초간 '완전 휴식'
-        # 이 과정이 429 에러를 피하는 핵심 포인트입니다.
-        print("⏳ 구글 서버의 쿼터 리셋을 위해 30초간 대기합니다...")
-        time.sleep(30)
+        # 쿼터 리셋을 위해 요청 전 20초 대기
+        time.sleep(20) 
 
-        model = genai.GenerativeModel(model_name)
+        # 2.5-flash 모델 사용 (분석 대상이 줄어들어 성공 확률 UP)
+        model = genai.GenerativeModel('models/gemini-2.5-flash')
         
-        # 🎯 사용자님이 요청하신 '딥리서치' 스타일 프롬프트
         prompt = """
-        오늘의 증시 리포트들을 심층 분석하여 '급등주 시장분석 딥리서치'를 작성해줘.
-        1. 시장 핵심 요약 (코스피/코스닥 종가 및 등락 포함)
-        2. 급등주 핵심 키워드 10개 (등락폭 큰 순서대로)
-        3. 각 키워드별 주요 종목과 등락률, 매매대금, 수급 특징 분석
-        4. 테마별 심층 분석 및 내일 장 전망
-        한국어로 전문 애널리스트처럼 상세하게 작성해줘.
+        오늘의 증시 리포트(코스피, 코스닥)를 심층 분석하여 '딥리서치 시장 보고서'를 작성해줘.
+        1. 시장 핵심 요약 (지수 종가 및 특징)
+        2. 급등주 핵심 키워드 10개 (등락폭 순 정렬)
+        3. 각 키워드별 주요 종목의 등락률, 매매대금, 수급 특징
+        4. 테마별 심층 분석 및 향후 전망
+        한국어로 가독성 있게, 전문 애널리스트 스타일로 작성해줘.
         """
         
         response = model.generate_content([prompt] + uploaded_files)
         return response.text
 
     except Exception as e:
-        error_msg = str(e)
-        print(f"❌ 요약 실패 원인: {error_msg}")
+        if "429" in str(e):
+            return "⚠️ API 쿼터 초과로 상세 분석이 제한되었습니다. 아래 PDF를 참고해 주세요."
+        return f"🤖 분석 중 오류 발생: {str(e)}"
+
+if __name__ == "__main__":
+    reports = download_all_today_reports()
+    
+    if reports:
+        # 1. 요약은 상위 2개 파일로만 진행 (딥리서치 시도)
+        full_summary = summarize_all_in_one(reports)
+        send_to_telegram(text=f"📊 [오늘의 증시 딥리서치]\n\n{full_summary}")
         
-        # 만약 모델명이 틀렸다는 에러(404)가 나면 2.0으로 자동 전환 시도
-        if "404" in error_msg and "2.0" not in model_name:
-            print("🔄 모델명을 찾을 수 없어 2.0-flash로 재시도합니다...")
-            time.sleep(20)
-            # 재시도 로직...
-            
-        return "🤖 리포트 분석 중 API 제한이 발생했습니다. 잠시 후 수동으로 [Run workflow]를 눌러보세요."
+        # 2. 파일 전송은 '코넥스'를 포함한 3개 모두 전송 (사용자 확인용)
+        for report in reports:
+            img = convert_to_image(report)
+            if img: send_to_telegram(image_path=img)
+            send_to_telegram(file_path=report)
+            time.sleep(2)
+    else:
+        print("📭 리포트 없음")
         
 def convert_to_image(pdf_path):
     """PDF 첫 페이지를 JPG 이미지로 변환합니다."""
