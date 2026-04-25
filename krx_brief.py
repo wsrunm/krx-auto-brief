@@ -16,6 +16,18 @@ genai.configure(api_key=GEMINI_API_KEY)
 # 💡 1.5가 없다면 2.0-flash 혹은 현재 성공하신 2.5-flash를 사용합니다.
 model_name = 'models/gemini-2.0-flash' # 1.5가 없다면 2.0이 표준일 확률이 높습니다.
 
+def get_target_date():
+    """실행 시점이 주말이면 가장 가까운 금요일 날짜를 반환합니다."""
+    target = datetime.datetime.now()
+    weekday = target.weekday() # 0:월, 1:화, 2:수, 3:목, 4:금, 5:토, 6:일
+
+    if weekday == 5: # 토요일
+        target = target - datetime.timedelta(days=1)
+    elif weekday == 6: # 일요일
+        target = target - datetime.timedelta(days=2)
+    
+    return target.strftime('%Y%m%d')
+
 def download_all_today_reports():
     """오늘 날짜의 01~99번 리포트를 전수 조사하여 다운로드합니다."""
     session = requests.Session()
@@ -24,12 +36,14 @@ def download_all_today_reports():
         'Referer': 'https://www.krx.co.kr/'
     })
     
-    today_str = datetime.datetime.now().strftime('%Y%m%d')
+    # today_str = datetime.datetime.now().strftime('%Y%m%d')
+    # 💡 주말 처리가 포함된 날짜 가져오기
+    target_date_str = get_target_date()
     downloaded_files = []
 
-    print(f"🚀 {today_str} 리포트 탐색 시작...")
+    print(f"🚀 {target_date_str} 리포트 탐색 시작...")
     for i in range(99, 0, -1):
-        seq = f"{today_str}{i:02d}"
+        seq = f"{target_date_str}{i:02d}"
         try:
             # 1. OTP 발급
             otp_res = session.get("https://www.krx.co.kr/contents/COM/GenerateOTP.jspx", params={
