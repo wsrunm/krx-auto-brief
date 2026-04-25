@@ -70,15 +70,25 @@ def download_all_today_reports():
 
 def sort_krx_reports(file_paths):
     """
-    파일명의 일련번호(끝자리 2자)를 기준으로 내림차순 정렬합니다.
-    42(종합/코스피) > 21(코스닥) > 16~18(코넥스) 순서를 보장합니다.
+    사용자 요청 순서 강제 고정: 11 -> 52 -> 36 -> 26
+    번호가 낮을수록 먼저 전송되어 상단에 위치합니다.
     """
-    def get_seq(path):
-        # 파일명에서 마지막 숫자 2자리를 추출 (예: KRX_2026042442.pdf -> 42)
-        match = re.search(r'(\d{2})\.pdf$', path)
-        return int(match.group(1)) if match else 0
+    # 💡 텔레그램 전송 순서 (1등이 맨 위)
+    priority_map = {
+        '11': 1,  # 증시 Brief (최우선)
+        '52': 2,  # 두 번째 리포트
+        '36': 3,  # 코스닥 관련
+        '26': 4   # 코넥스/기타
+    }
 
-    return sorted(file_paths, key=get_seq, reverse=True)
+    def get_priority(path):
+        # 파일명 끝의 숫자 2자리 추출
+        match = re.search(r'(\d{2})\.pdf$', path)
+        seq = match.group(1) if match else '99'
+        return priority_map.get(seq, 99) # 맵에 없으면 뒤로 밀기
+
+    # 지정한 우선순위 숫자가 낮은 순서대로 정렬
+    return sorted(file_paths, key=get_priority)
 
 def summarize_all_in_one(file_paths):
     if not file_paths: return "파일 없음"
