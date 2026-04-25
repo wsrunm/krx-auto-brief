@@ -43,7 +43,7 @@ def download_all_today_reports():
 
     # 💡 [검증 포인트] 99번 루프 대신 필요한 핵심 번호만 리스트로 관리
     # 11: 증시 Brief (전체), 36: 코스닥 시장 요약
-    target_sequences = ['11', '36'] 
+    target_sequences = ['11', '52'] 
 
     print(f"🚀 {target_date_str} 핵심 리포트 탐색 시작...")
     
@@ -82,7 +82,7 @@ def sort_krx_reports(file_paths):
     11번(Brief)과 36번(코스닥)의 순서를 정합니다.
     요청하신 대로 11번이 먼저 오도록 설정했습니다.
     """
-    priority = {'11': 1, '36': 2}
+    priority = {'11': 1, '52': 2}
     def get_val(path):
         match = re.search(r'(\d{2})\.pdf$', path)
         return priority.get(match.group(1), 99) if match else 99
