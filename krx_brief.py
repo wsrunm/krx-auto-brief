@@ -173,7 +173,7 @@ def generate_deep_research():
     response = model_name.generate_content(prompt)
     return response.text
     
-def cleanup_old_files_by_name(days=3):
+def cleanup_old_files_by_name(days):
     """파일명의 날짜(YYYYMMDD)를 기준으로 n일이 지난 파일을 삭제합니다."""
     today = datetime.datetime.now()
     threshold_date = today - datetime.timedelta(days=days)
@@ -199,7 +199,7 @@ def cleanup_old_files_by_name(days=3):
 
 if __name__ == "__main__":
     # 1. 이전 파일들 먼저 청소 (7일 기준)
-    cleanup_old_files(days=3)
+    cleanup_old_files_by_name(days=3)
     
     # 1. 파일 다운로드
     reports = download_all_today_reports()
