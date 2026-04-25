@@ -2,6 +2,7 @@ import requests
 import os
 import datetime
 import time
+import re
 from pdf2image import convert_from_path
 import google.generativeai as genai
 
