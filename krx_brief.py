@@ -172,8 +172,35 @@ def generate_deep_research():
     
     response = model_name.generate_content(prompt)
     return response.text
+    
+def cleanup_old_files(days=7):
+    """현재 폴더 내의 PDF/JPG 파일 중 수정된 지 n일이 지난 파일을 삭제합니다."""
+    # n일을 초 단위로 환산 (7일 = 604,800초)
+    threshold = days * 24 * 60 * 60
+    current_time = time.time()
+    
+    print(f"🧹 {days}일 이상 지난 파일 정리 시작...")
+    
+    # 현재 디렉토리의 모든 파일 탐색
+    for file in os.listdir("."):
+        # 우리가 생성한 리포트 파일(pdf, jpg)만 대상으로 함
+        if file.endswith(".pdf") or file.endswith(".jpg"):
+            file_path = os.path.join(".", file)
+            # 파일의 수정 시간 가져오기
+            file_mtime = os.path.getmtime(file_path)
+            
+            # 현재 시간과 수정 시간의 차이가 기준치보다 크면 삭제
+            if current_time - file_mtime > threshold:
+                try:
+                    os.remove(file_path)
+                    print(f"  🗑️ 삭제됨: {file}")
+                except Exception as e:
+                    print(f"  ❌ 삭제 실패 ({file}): {e}")
 
 if __name__ == "__main__":
+    # 1. 이전 파일들 먼저 청소 (7일 기준)
+    cleanup_old_files(days=3)
+    
     # 1. 파일 다운로드
     reports = download_all_today_reports()
     
