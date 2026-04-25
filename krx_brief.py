@@ -30,21 +30,25 @@ def get_target_date():
     return target.strftime('%Y%m%d')
 
 def download_all_today_reports():
-    """오늘 날짜의 01~99번 리포트를 전수 조사하여 다운로드합니다."""
+    """핵심 리포트(11번, 36번)만 타겟팅하여 다운로드합니다."""
     session = requests.Session()
     session.headers.update({
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
         'Referer': 'https://www.krx.co.kr/'
     })
     
-    # today_str = datetime.datetime.now().strftime('%Y%m%d')
-    # 💡 주말 처리가 포함된 날짜 가져오기
+    # 주말 처리가 포함된 날짜 가져오기 (이미 구현된 get_target_date 활용)
     target_date_str = get_target_date()
     downloaded_files = []
 
-    print(f"🚀 {target_date_str} 리포트 탐색 시작...")
-    for i in range(99, 0, -1):
-        seq = f"{target_date_str}{i:02d}"
+    # 💡 [검증 포인트] 99번 루프 대신 필요한 핵심 번호만 리스트로 관리
+    # 11: 증시 Brief (전체), 36: 코스닥 시장 요약
+    target_sequences = ['11', '36'] 
+
+    print(f"🚀 {target_date_str} 핵심 리포트 탐색 시작...")
+    
+    for s in target_sequences:
+        seq = f"{target_date_str}{s}" # 예: 2026042411
         try:
             # 1. OTP 발급
             otp_res = session.get("https://www.krx.co.kr/contents/COM/GenerateOTP.jspx", params={
@@ -53,7 +57,10 @@ def download_all_today_reports():
             }, timeout=3)
             
             otp = otp_res.text.strip()
-            if not otp or len(otp) < 40: continue
+            # OTP가 짧거나 없으면 해당 번호의 리포트가 없는 것임
+            if not otp or len(otp) < 40: 
+                print(f"  ℹ️ {s}번 리포트가 아직 올라오지 않았습니다.")
+                continue
             
             # 2. 파일 다운로드 (POST 방식)
             pdf_res = session.post("https://file.krx.co.kr/download.jspx", data={'code': otp}, timeout=10)
@@ -61,34 +68,26 @@ def download_all_today_reports():
                 fname = f"KRX_{seq}.pdf"
                 with open(fname, 'wb') as f:
                     f.write(pdf_res.content)
-                print(f"  ✅ 다운로드 성공: {fname}")
+                print(f"  ✅ 핵심 리포트 다운로드 성공: {fname}")
                 downloaded_files.append(fname)
-                time.sleep(0.5)
-        except:
+                time.sleep(1) # 서버 매너 대기
+        except Exception as e:
+            print(f"  ❌ {s}번 다운로드 시도 중 오류: {e}")
             continue
+            
     return downloaded_files
 
 def sort_krx_reports(file_paths):
     """
-    사용자 요청 순서 강제 고정: 11 -> 52 -> 36 -> 26
-    번호가 낮을수록 먼저 전송되어 상단에 위치합니다.
+    11번(Brief)과 36번(코스닥)의 순서를 정합니다.
+    요청하신 대로 11번이 먼저 오도록 설정했습니다.
     """
-    # 💡 텔레그램 전송 순서 (1등이 맨 위)
-    priority_map = {
-        '11': 1,  # 증시 Brief (최우선)
-        '52': 2,  # 두 번째 리포트
-        '36': 3,  # 코스닥 관련
-        '26': 4   # 코넥스/기타
-    }
-
-    def get_priority(path):
-        # 파일명 끝의 숫자 2자리 추출
+    priority = {'11': 1, '36': 2}
+    def get_val(path):
         match = re.search(r'(\d{2})\.pdf$', path)
-        seq = match.group(1) if match else '99'
-        return priority_map.get(seq, 99) # 맵에 없으면 뒤로 밀기
+        return priority.get(match.group(1), 99) if match else 99
 
-    # 지정한 우선순위 숫자가 낮은 순서대로 정렬
-    return sorted(file_paths, key=get_priority)
+    return sorted(file_paths, key=get_val)
 
 def summarize_all_in_one(file_paths):
     if not file_paths: return "파일 없음"
