@@ -53,6 +53,20 @@ def download_all_today_reports():
             continue
     return downloaded_files
 
+def sort_krx_reports(file_paths):
+    """
+    파일명의 일련번호를 추출하여 중요도 순으로 정렬합니다.
+    예: 42(종합/코스피) > 21(코스닥) > 16(코넥스)
+    """
+    def extract_number(path):
+        import re
+        # 파일명에서 숫자 부분만 추출 (예: KRX_2026042242 -> 2026042242)
+        match = re.search(r'(\d+)', path)
+        return int(match.group(0)) if match else 0
+
+    # 숫자가 큰 순서(내림차순)로 정렬하여 [종합, 코스닥, 코넥스] 순서를 보장함
+    return sorted(file_paths, key=extract_number, reverse=True)
+
 def summarize_all_in_one(file_paths):
     if not file_paths: return "파일 없음"
     
@@ -142,6 +156,10 @@ if __name__ == "__main__":
     reports = download_all_today_reports()
     
     if reports:
+        # 💡 [추가] 다운로드 받은 리포트를 중요도 순으로 재정렬
+        reports = sort_krx_reports(reports)
+        print(f"📋 정렬된 리포트 순서: {reports}")
+        
         # 2. 종합 요약 생성 및 1회 전송
         total_summary = summarize_all_in_one(reports)
         send_to_telegram(text=f"📊 [오늘의 증시 종합 브리핑]\n\n{total_summary}")
