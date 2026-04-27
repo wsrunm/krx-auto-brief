@@ -47,7 +47,7 @@ def download_all_today_reports():
 
     print(f"🔍 {target_date_str} 리포트 전수 조사 시작 (01~60)...")
     
-    for i in range(1, 61):
+    for i in range(1, 99):
         seq = f"{target_date_str}{i:02d}"
         try:
             # OTP 발급 시도
