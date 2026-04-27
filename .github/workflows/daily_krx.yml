@@ -66,3 +66,24 @@ jobs:
               git push
             fi
           fi
+
+      - name: Commit and Push changes
+        run: |
+          git config --global user.name 'github-actions'
+          git config --global user.email 'action@github.com'
+          
+          # 1. 모든 변경사항(추가 및 삭제) 스테이징
+          git add -A
+          
+          # 2. 변경사항이 있는지 확인 후 커밋
+          if ! git diff --cached --quiet; then
+            git commit -m "chore: cleanup old reports and update latest"
+            
+            # 3. 🚀 핵심: 원격 저장소의 최신 내용을 먼저 가져와서 합칩니다 (충돌 방지)
+            git pull --rebase origin main
+            
+            # 4. 최종적으로 서버에 올리기
+            git push
+          else
+            echo "No changes to commit"
+          fi
