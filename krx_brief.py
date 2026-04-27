@@ -98,57 +98,6 @@ def download_all_today_reports():
     
     return downloaded_files
     
-def download_all_today_reports2():
-    """핵심 리포트(11번, 36번)만 타겟팅하여 다운로드합니다."""
-    session = requests.Session()
-    session.headers.update({
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-        'Referer': 'https://www.krx.co.kr/'
-    })
-    
-    # 주말 처리가 포함된 날짜 가져오기 (이미 구현된 get_target_date 활용)
-    target_date_str = get_target_date()
-    downloaded_files = []
-
-    # 💡 [검증 포인트] 99번 루프 대신 필요한 핵심 번호만 리스트로 관리
-    # 11: 증시 Brief (전체), 36: 코스닥 시장 요약
-    target_sequences = ['11', '52'] 
-
-    print(f"🚀 {target_date_str} 핵심 리포트 탐색 시작...")
-    
-    for s in target_sequences:
-        seq = f"{target_date_str}{s}" # 예: 2026042411
-        try:
-            # 1. OTP 발급
-            otp_res = session.get("https://www.krx.co.kr/contents/COM/GenerateOTP.jspx", params={
-                'name': 'fileDown', 'filetype': 'att', 
-                'url': 'MKD/01/0101/01010000/mkd01010000_03', 'seq': seq
-            }, timeout=3)
-            
-            otp = otp_res.text.strip()
-            # OTP가 짧거나 없으면 해당 번호의 리포트가 없는 것임
-            if not otp or len(otp) < 40: 
-                print(f"  ℹ️ {s}번 리포트가 아직 올라오지 않았습니다.")
-                continue
-            
-            # 2. 파일 다운로드 (POST 방식)
-            pdf_res = session.post("https://file.krx.co.kr/download.jspx", data={'code': otp}, timeout=10)
-            if pdf_res.status_code == 200 and pdf_res.content.startswith(b'%PDF'):
-                fname = f"KRX_{seq}.pdf"
-                with open(fname, 'wb') as f:
-                    f.write(pdf_res.content)
-                print(f"  ✅ 핵심 리포트 다운로드 성공: {fname}")
-                downloaded_files.append(fname)
-                time.sleep(1) # 서버 매너 대기
-        except Exception as e:
-            print(f"  ❌ {s}번 다운로드 시도 중 오류: {e}")
-            continue
-            
-    return downloaded_files
-
-from pypdf import PdfReader
-import re
-
 def get_report_priority_by_content(file_path):
     """리포트 내부의 텍스트를 읽어 실제 정체를 파악하고 우선순위를 반환합니다."""
     try:
@@ -271,33 +220,50 @@ def generate_deep_research():
     response = model_name.generate_content(prompt)
     return response.text
     
-def cleanup_old_files_by_name(days):
-    """파일명의 날짜(YYYYMMDD)를 기준으로 n일이 지난 파일을 삭제합니다."""
-    today = datetime.datetime.now()
-    threshold_date = today - datetime.timedelta(days=days)
+import subprocess
+import glob
+import re
+import datetime
+
+def cleanup_old_files_by_name(days=3):
+    """
+    파일명에 포함된 날짜를 기준으로 N일이 지난 파일을 깃허브 저장소에서 완전히 삭제합니다.
+    """
+    print(f"\n🧹 {days}일 이상 지난 과거 리포트 정리 시작...")
     
-    print(f"🧹 파일명 기준 {days}일 이상 지난 리포트 정리 시작...")
+    # 한국 시간 기준 '오늘' 날짜 계산
+    now_kst = datetime.datetime.utcnow() + datetime.timedelta(hours=9)
+    today_date = now_kst.date()
     
-    for file in os.listdir("."):
-        # KRX_2026042411.pdf 또는 .jpg 형태인지 확인
-        if (file.endswith(".pdf") or file.endswith(".jpg")) and "KRX_" in file:
+    # 폴더 내의 모든 KRX_*.pdf 및 KRX_*.jpg 파일 찾기
+    target_files = glob.glob("KRX_*.pdf") + glob.glob("KRX_*.jpg")
+    
+    deleted_count = 0
+    for f in target_files:
+        # 파일명에서 YYYYMMDD 날짜 추출 (예: KRX_2026042411.pdf -> 20260424)
+        match = re.search(r'KRX_(\d{8})', f)
+        if match:
+            date_str = match.group(1)
             try:
-                # 파일명에서 날짜 8자리 추출 (예: 20260424)
-                match = re.search(r'KRX_(\d{8})', file)
-                if match:
-                    file_date_str = match.group(1)
-                    file_date = datetime.datetime.strptime(file_date_str, '%Y%m%d')
-                    
-                    # 기준 날짜보다 이전이면 삭제
-                    if file_date < threshold_date:
-                        os.remove(file)
-                        print(f"  🗑️ 삭제 완료 (날짜 경과): {file}")
-            except Exception as e:
-                print(f"  ❌ 분석 및 삭제 실패 ({file}): {e}")
+                # 추출한 문자열을 실제 날짜 객체로 변환
+                file_date = datetime.datetime.strptime(date_str, '%Y%m%d').date()
+                diff_days = (today_date - file_date).days
+                
+                # 기준일(days) 이상 지났으면 삭제 진행
+                if diff_days >= days:
+                    print(f"  🗑️ [Git 삭제] {diff_days}일 지난 파일: {f}")
+                    # 💡 os.remove(f) 대신 git rm 명령어 실행
+                    # check=False로 두어 만약 Git 추적 대상이 아니더라도 에러 없이 넘어가게 함
+                    subprocess.run(["git", "rm", f], check=False)
+                    deleted_count += 1
+            except ValueError:
+                continue # 날짜 형식이 이상한 파일은 무시
 
+    if deleted_count == 0:
+        print("  ✨ 삭제할 과거 파일이 없습니다.")
+    else:
+        print(f"  ✅ 총 {deleted_count}개의 과거 파일이 저장소에서 삭제 대기열에 올랐습니다.")
 
-
-# ... (기존 함수들: download_all_today_reports, sort_krx_reports 등) ...
 
 def is_junk_report(file_path):
     """PDF 첫 페이지를 읽어 코넥스 및 불필요한 리포트를 판별합니다."""
