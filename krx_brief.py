@@ -30,6 +30,58 @@ def get_target_date():
     return target.strftime('%Y%m%d')
 
 def download_all_today_reports():
+    """01~60번을 모두 확인하고, 발견된 모든 파일명을 출력합니다."""
+    session = requests.Session()
+    session.headers.update({
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        'Referer': 'https://www.krx.co.kr/'
+    })
+    
+    # 한국 시간 기준 날짜 설정
+    now_kst = datetime.datetime.utcnow() + datetime.timedelta(hours=9)
+    if now_kst.weekday() == 5: now_kst -= datetime.timedelta(days=1)
+    elif now_kst.weekday() == 6: now_kst -= datetime.timedelta(days=2)
+    target_date_str = now_kst.strftime('%Y%m%d')
+    
+    downloaded_files = []
+
+    print(f"🔍 {target_date_str} 리포트 전수 조사 시작 (01~60)...")
+    
+    for i in range(1, 61):
+        seq = f"{target_date_str}{i:02d}"
+        try:
+            # OTP 발급 시도
+            otp_res = session.get("https://www.krx.co.kr/contents/COM/GenerateOTP.jspx", params={
+                'name': 'fileDown', 'filetype': 'att', 
+                'url': 'MKD/01/0101/01010000/mkd01010000_03', 'seq': seq
+            }, timeout=2)
+            
+            otp = otp_res.text.strip()
+            if not otp or len(otp) < 40: 
+                continue # 파일이 없으면 조용히 넘어갑니다.
+            
+            # 파일 다운로드 시도
+            pdf_res = session.post("https://file.krx.co.kr/download.jspx", data={'code': otp}, timeout=10)
+            if pdf_res.status_code == 200 and pdf_res.content.startswith(b'%PDF'):
+                fname = f"KRX_{seq}.pdf"
+                with open(fname, 'wb') as f:
+                    f.write(pdf_res.content)
+                downloaded_files.append(fname)
+                print(f"  ✨ 발견: {fname}") # 실시간 발견 로그
+                time.sleep(0.2)
+        except:
+            continue
+    
+    # 💡 [핵심] 여기서 전체 리스트를 한 번 더 출력해줍니다.
+    print("\n" + "="*50)
+    print(f"📋 최종 발견된 리포트 리스트 ({len(downloaded_files)}개)")
+    for f in downloaded_files:
+        print(f"  - {f}")
+    print("="*50 + "\n")
+    
+    return downloaded_files
+    
+def download_all_today_reports2():
     """핵심 리포트(11번, 36번)만 타겟팅하여 다운로드합니다."""
     session = requests.Session()
     session.headers.update({
