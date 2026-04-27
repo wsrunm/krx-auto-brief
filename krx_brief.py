@@ -6,6 +6,8 @@ import re
 from pdf2image import convert_from_path
 import google.generativeai as genai
 
+from pypdf import PdfReader
+
 # 환경 변수 설정
 GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY')
 TELEGRAM_TOKEN = os.environ.get('TELEGRAM_TOKEN')
@@ -29,6 +31,21 @@ def get_target_date():
     
     return target.strftime('%Y%m%d')
 
+def is_konex_report(file_path):
+    """PDF 첫 페이지의 텍스트를 읽어 코넥스 리포트인지 판별합니다."""
+    try:
+        reader = PdfReader(file_path)
+        first_page = reader.pages[0]
+        text = first_page.extract_text()
+        
+        # 제목이나 상단에 '코넥스' 또는 'KONEX'가 포함되어 있는지 확인
+        if "코넥스" in text or "KONEX" in text:
+            return True
+        return False
+    except Exception as e:
+        print(f"  ⚠️ 내용 분석 실패 ({file_path}): {e}")
+        return False
+        
 def download_all_today_reports():
     """01~60번을 모두 확인하고, 발견된 모든 파일명을 출력합니다."""
     session = requests.Session()
@@ -129,17 +146,46 @@ def download_all_today_reports2():
             
     return downloaded_files
 
-def sort_krx_reports(file_paths):
-    """
-    11번(Brief)과 36번(코스닥)의 순서를 정합니다.
-    요청하신 대로 11번이 먼저 오도록 설정했습니다.
-    """
-    priority = {'11': 1, '52': 2}
-    def get_val(path):
-        match = re.search(r'(\d{2})\.pdf$', path)
-        return priority.get(match.group(1), 99) if match else 99
+from pypdf import PdfReader
+import re
 
-    return sorted(file_paths, key=get_val)
+def get_report_priority_by_content(file_path):
+    """리포트 내부의 텍스트를 읽어 실제 정체를 파악하고 우선순위를 반환합니다."""
+    try:
+        reader = PdfReader(file_path)
+        first_page = reader.pages[0]
+        text = first_page.extract_text()
+        
+        # 1순위: 증시 Brief (가장 핵심 리포트)
+        if "증시 Brief" in text or "증시브리프" in text:
+            return 1
+        
+        # 2순위: 코스닥시장 (사용자님의 주요 관심사)
+        if "코스닥시장" in text and "일일동향" in text:
+            return 2
+        
+        # 3순위: 유가증권시장(KOSPI) 일일동향
+        if "유가증권시장" in text and "일일동향" in text:
+            return 3
+            
+        # 그 외 나머지는 뒤로 보냄
+        return 50
+    except:
+        return 99
+
+def sort_krx_reports(file_paths):
+    """내용 기반으로 우선순위를 정해 정렬합니다."""
+    # 각 파일의 경로와 우선순위를 튜플로 묶어서 정렬
+    indexed_reports = []
+    for path in file_paths:
+        priority = get_report_priority_by_content(path)
+        indexed_reports.append((priority, path))
+    
+    # 우선순위(priority) 숫자 순서대로 정렬 (1이 가장 먼저)
+    indexed_reports.sort(key=lambda x: x[0])
+    
+    # 정렬된 파일 경로만 다시 리스트로 반환
+    return [report[1] for report in indexed_reports]
 
 def summarize_all_in_one(file_paths):
     if not file_paths: return "파일 없음"
@@ -249,38 +295,81 @@ def cleanup_old_files_by_name(days):
             except Exception as e:
                 print(f"  ❌ 분석 및 삭제 실패 ({file}): {e}")
 
+
+
+# ... (기존 함수들: download_all_today_reports, sort_krx_reports 등) ...
+
+def is_junk_report(file_path):
+    """PDF 첫 페이지를 읽어 코넥스 및 불필요한 리포트를 판별합니다."""
+    try:
+        reader = PdfReader(file_path)
+        first_page = reader.pages[0]
+        text = first_page.extract_text()
+        
+        # 제외하고 싶은 키워드 리스트
+        # '코넥스'가 포함된 리포트는 무조건 True 반환
+        black_list = ["코넥스", "KONEX", "파생상품"]
+        
+        if any(keyword in text for keyword in black_list):
+            return True
+        return False
+    except Exception as e:
+        print(f"  ⚠️ 내용 분석 실패 ({file_path}): {e}")
+        return False
+
+# ---------------------------------------------------------
+# 🚀 최적화된 메인 실행부
+# ---------------------------------------------------------
 if __name__ == "__main__":
-    # 1. 이전 파일들 먼저 청소 (7일 기준)
+    # 1. 환경 정리: 파일명 날짜 기준으로 3일 지난 구버전 파일 삭제
     cleanup_old_files_by_name(days=3)
     
-    # 1. 파일 다운로드
-    reports = download_all_today_reports()
+    # 2. 전수 조사: 오늘자 리포트 01~60번 싹 훑어서 다운로드
+    raw_reports = download_all_today_reports()
     
-    if reports:
-        # 💡 [추가] 다운로드 받은 리포트를 중요도 순으로 재정렬
-        reports = sort_krx_reports(reports)
-        print(f"📋 정렬된 리포트 순서: {reports}")
+    valid_reports = []
+    
+    if raw_reports:
+        print("\n🕵️ 리포트 내용 검수 및 코넥스 필터링 시작...")
+        for report in raw_reports:
+            # 3. 내용 기반 필터링
+            if is_junk_report(report):
+                print(f"  🗑️ [즉시 삭제] 코넥스/불필요 리포트 제거: {report}")
+                try:
+                    os.remove(report) # 👈 여기서 파일을 즉시 지웁니다.
+                except:
+                    pass
+            else:
+                # 4. 살아남은 알짜배기 리포트만 리스트에 추가
+                valid_reports.append(report)
         
-        # 2. 종합 요약 생성 및 1회 전송
-        total_summary = summarize_all_in_one(reports)
-        send_to_telegram(text=f"📊 [오늘의 증시 종합 브리핑]\n\n{total_summary}")
-        
-        # 3. 개별 파일에 대해 이미지와 PDF 전송
-        for report in reports:
-            print(f"🚀 {report} 전송 중...")
+        # 5. 최종 리스트 기반 정렬 및 전송
+        if valid_reports:
+            # 선호 번호(11, 52 등) 기준으로 정렬
+            sorted_reports = sort_krx_reports(valid_reports)
             
-            # 이미지 변환 및 전송
-            img = convert_to_image(report)
-            if img:
-                send_to_telegram(image_path=img)
+            print(f"📋 최종 전송 대상: {sorted_reports}")
             
-            # 원본 PDF 전송
-            send_to_telegram(file_path=report)
+            # 6. AI 딥리서치 생성 (상위 2개 핵심 리포트 분석)
+            deep_research = summarize_all_in_one(sorted_reports)
+            send_to_telegram(text=f"📊 **오늘의 증시 딥리서치**\n\n{deep_research}")
             
-            # 전송 안정성을 위해 1초 대기
-            time.sleep(1)
+            # 7. 개별 리포트 이미지 및 파일 전송
+            for report in sorted_reports:
+                try:
+                    # 이미지 변환 및 저장
+                    img_pages = convert_from_path(report, dpi=150)
+                    img_name = report.replace(".pdf", ".jpg")
+                    img_pages[0].save(img_name, "JPEG")
+                    
+                    # 텔레그램 전송 (순서 보장을 위해 3초 간격)
+                    send_to_telegram(image_path=img_name)
+                    time.sleep(3)
+                    send_to_telegram(file_path=report)
+                    time.sleep(3)
+                except Exception as e:
+                    print(f"  ❌ {report} 전송 중 오류: {e}")
+        else:
+            print("📭 코넥스를 제외하니 남은 리포트가 없습니다.")
     else:
-        print("📭 오늘 올라온 리포트가 없습니다.")
-        
-    #g_report = generate_deep_research()
-    #send_to_telegram(text=f"📊 [오늘의 주도주]\n\n{g_report}")
+        print("📭 오늘자 리포트가 KRX 서버에 아직 올라오지 않았습니다.")
