@@ -2,9 +2,14 @@ name: Daily KRX Brief Automation
 
 on:
   schedule:
-    # 한국 시간 오후 5시 (UTC 오전 8시) 실행
-    - cron: '0 8 * * 1-5' 
-  workflow_dispatch:
+    # 💡 한국 시간(KST) 평일 오후 4시 38분 설정
+    # 16:38 KST - 9시간 = 07:38 UTC
+    # 분(38) 시(7) 일(*) 월(*) 요일(1-5: 월~금)
+    - cron: '38 7 * * 1-5'
+  
+  workflow_dispatch:      # 필요할 때 직접 'Run workflow' 버튼으로 실행 가능
+  push:
+    branches: [ "main" ]  # 코드를 수정해서 올리면 즉시 테스트 실행
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
