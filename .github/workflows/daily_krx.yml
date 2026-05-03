@@ -1,11 +1,13 @@
 name: Daily KRX Brief Automation
 
 on:
-  schedule:
+  repository_dispatch:
+    types: [Gas_Krx_trigger]
+  #schedule:
     # 💡 한국 시간(KST) 평일 오후 4시 38분 설정
     # 16:38 KST - 9시간 = 07:38 UTC
     # 분(38) 시(7) 일(*) 월(*) 요일(1-5: 월~금)
-    - cron: '38 7 * * 1-5'
+    # - cron: '38 7 * * 1-5'
   
   workflow_dispatch:      # 필요할 때 직접 'Run workflow' 버튼으로 실행 가능
   push:
