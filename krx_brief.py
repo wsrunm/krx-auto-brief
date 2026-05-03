@@ -46,23 +46,28 @@ def is_konex_report(file_path):
         print(f"  ⚠️ 내용 분석 실패 ({file_path}): {e}")
         return False
         
-def download_all_today_reports():
-    """01~60번을 모두 확인하고, 발견된 모든 파일명을 출력합니다."""
+def download_all_today_reports(target_date_str=None):
+    """
+    지정된 날짜의 01~98번 리포트를 모두 확인하고, 발견된 파일명을 반환합니다.
+    (target_date_str가 None이면 KST 기준 오늘 날짜를 사용합니다.)
+    """
     session = requests.Session()
     session.headers.update({
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
         'Referer': 'https://www.krx.co.kr/'
     })
     
-    # 한국 시간 기준 날짜 설정
-    now_kst = datetime.datetime.utcnow() + datetime.timedelta(hours=9)
-    if now_kst.weekday() == 5: now_kst -= datetime.timedelta(days=1)
-    elif now_kst.weekday() == 6: now_kst -= datetime.timedelta(days=2)
-    target_date_str = now_kst.strftime('%Y%m%d')
+    # 인자로 받은 날짜가 없으면 기존처럼 오늘(주말이면 금요일)로 설정
+    if target_date_str is None:
+        now_kst = datetime.datetime.utcnow() + datetime.timedelta(hours=9)
+        if now_kst.weekday() == 5: now_kst -= datetime.timedelta(days=1)
+        elif now_kst.weekday() == 6: now_kst -= datetime.timedelta(days=2)
+        target_date_str = now_kst.strftime('%Y%m%d')
     
     downloaded_files = []
 
-    print(f"🔍 {target_date_str} 리포트 전수 조사 시작 (01~60)...")
+    # 안내 로그 (전수 조사 중복 출력 방지를 위해 여기서는 제거하거나 간소화)
+    # print(f"🔍 {target_date_str} 리포트 다운로드 시도 (01~98)...")
     
     for i in range(1, 99):
         seq = f"{target_date_str}{i:02d}"
@@ -84,17 +89,18 @@ def download_all_today_reports():
                 with open(fname, 'wb') as f:
                     f.write(pdf_res.content)
                 downloaded_files.append(fname)
-                print(f"  ✨ 발견: {fname}") # 실시간 발견 로그
+                print(f"  ✨ 원본 다운로드 완료: {fname}") 
                 time.sleep(0.2)
         except:
             continue
     
-    # 💡 [핵심] 여기서 전체 리스트를 한 번 더 출력해줍니다.
-    print("\n" + "="*50)
-    print(f"📋 최종 발견된 리포트 리스트 ({len(downloaded_files)}개)")
-    for f in downloaded_files:
-        print(f"  - {f}")
-    print("="*50 + "\n")
+    # 찾은 리포트가 있을 때만 요약 출력 (로그 창을 깔끔하게 유지하기 위함)
+    if downloaded_files:
+        print("\n" + "="*50)
+        print(f"📋 다운로드 성공 리포트 리스트 ({len(downloaded_files)}개)")
+        for f in downloaded_files:
+            print(f"  - {f}")
+        print("="*50 + "\n")
     
     return downloaded_files
     
@@ -283,59 +289,78 @@ def is_junk_report(file_path):
         print(f"  ⚠️ 내용 분석 실패 ({file_path}): {e}")
         return False
 
+
 # ---------------------------------------------------------
-# 🚀 최적화된 메인 실행부
+# 🚀 최적화된 메인 실행부 (최근 5일 역추적 버전)
 # ---------------------------------------------------------
 if __name__ == "__main__":
     # 1. 환경 정리: 파일명 날짜 기준으로 3일 지난 구버전 파일 삭제
     cleanup_old_files_by_name(days=3)
     
-    # 2. 전수 조사: 오늘자 리포트 01~60번 싹 훑어서 다운로드
-    raw_reports = download_all_today_reports()
-    
+    # 한국 시간(KST) 기준 설정
+    now_kst = datetime.datetime.utcnow() + datetime.timedelta(hours=9)
     valid_reports = []
-    
-    if raw_reports:
-        print("\n🕵️ 리포트 내용 검수 및 코넥스 필터링 시작...")
-        for report in raw_reports:
-            # 3. 내용 기반 필터링
-            if is_junk_report(report):
-                print(f"  🗑️ [즉시 삭제] 코넥스/불필요 리포트 제거: {report}")
-                try:
-                    os.remove(report) # 👈 여기서 파일을 즉시 지웁니다.
-                except:
-                    pass
-            else:
-                # 4. 살아남은 알짜배기 리포트만 리스트에 추가
-                valid_reports.append(report)
+    target_date_str = ""
+
+    # 2. 최근 5일간 리포트가 있는지 역순으로 전수 조사
+    for i in range(6):  # 0(오늘)부터 5일전까지 반복
+        current_date = now_kst - datetime.timedelta(days=i)
+        date_str = current_date.strftime('%Y%m%d')
         
-        # 5. 최종 리스트 기반 정렬 및 전송
-        if valid_reports:
-            # 선호 번호(11, 52 등) 기준으로 정렬
-            sorted_reports = sort_krx_reports(valid_reports)
+        print(f"\n🔍 {date_str} 리포트 전수 조사 시작 (01~60)...")
+        
+        # 💡 주의: download_all_today_reports() 함수가 date_str를 인자로 받도록 수정되어야 합니다.
+        raw_reports = download_all_today_reports(date_str)
+        
+        if raw_reports:
+            print(f"✅ {date_str} 리포트 {len(raw_reports)}개를 발견했습니다. 검수를 시작합니다.")
             
-            print(f"📋 최종 전송 대상: {sorted_reports}")
+            temp_valid = []
+            for report in raw_reports:
+                # 3. 내용 기반 필터링 (코넥스 등 제거)
+                if is_junk_report(report):
+                    print(f"  🗑️ [즉시 삭제] 코넥스/불필요 리포트 제거: {report}")
+                    try:
+                        os.remove(report)
+                    except:
+                        pass
+                else:
+                    temp_valid.append(report)
             
-            # 6. AI 딥리서치 생성 (상위 2개 핵심 리포트 분석)
-            deep_research = summarize_all_in_one(sorted_reports)
-            send_to_telegram(text=f"📊 **오늘의 증시 딥리서치**\n\n{deep_research}")
-            
-            # 7. 개별 리포트 이미지 및 파일 전송
-            for report in sorted_reports:
-                try:
-                    # 이미지 변환 및 저장
-                    img_pages = convert_from_path(report, dpi=150)
-                    img_name = report.replace(".pdf", ".jpg")
-                    img_pages[0].save(img_name, "JPEG")
-                    
-                    # 텔레그램 전송 (순서 보장을 위해 3초 간격)
-                    send_to_telegram(image_path=img_name)
-                    time.sleep(3)
-                    send_to_telegram(file_path=report)
-                    time.sleep(3)
-                except Exception as e:
-                    print(f"  ❌ {report} 전송 중 오류: {e}")
+            if temp_valid:
+                valid_reports = temp_valid
+                target_date_str = date_str
+                break  # 🎯 리포트를 찾았으므로 루프 탈출
+            else:
+                print(f"📭 {date_str}일자는 코넥스를 제외하니 남은 리포트가 없습니다. 이전 날짜를 확인합니다.")
         else:
-            print("📭 코넥스를 제외하니 남은 리포트가 없습니다.")
+            print(f"📭 {date_str}일자 리포트가 서버에 없습니다. 이전 날짜를 확인합니다.")
+
+    # 3. 최종 리스트 기반 정렬 및 전송
+    if valid_reports:
+        # 선호 번호(11, 52 등) 기준으로 정렬
+        sorted_reports = sort_krx_reports(valid_reports)
+        
+        print(f"📋 최종 전송 대상 ({target_date_str}): {sorted_reports}")
+        
+        # 4. AI 딥리서치 생성 (상위 2개 핵심 리포트 분석)
+        deep_research = summarize_all_in_one(sorted_reports)
+        send_to_telegram(text=f"📊 **증시 딥리서치 ({target_date_str})**\n\n{deep_research}")
+        
+        # 5. 개별 리포트 이미지 및 파일 전송
+        for report in sorted_reports:
+            try:
+                # 이미지 변환 및 저장
+                img_pages = convert_from_path(report, dpi=150)
+                img_name = report.replace(".pdf", ".jpg")
+                img_pages[0].save(img_name, "JPEG")
+                
+                # 텔레그램 전송 (순서 보장을 위해 간격 유지)
+                send_to_telegram(image_path=img_name)
+                time.sleep(3)
+                send_to_telegram(file_path=report)
+                time.sleep(3)
+            except Exception as e:
+                print(f"  ❌ {report} 전송 중 오류: {e}")
     else:
-        print("📭 오늘자 리포트가 KRX 서버에 아직 올라오지 않았습니다.")
+        print("❌ 최근 5일 이내에 전송할 수 있는 유효한 리포트가 없습니다.")
