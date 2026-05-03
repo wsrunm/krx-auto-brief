@@ -2,7 +2,7 @@ name: Daily KRX Brief Automation
 
 on:
   repository_dispatch:
-    types: [Gas_Krx_trigger]
+    types: [gas_trigger]
   #schedule:
     # 💡 한국 시간(KST) 평일 오후 4시 38분 설정
     # 16:38 KST - 9시간 = 07:38 UTC
