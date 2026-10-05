@@ -40,7 +40,7 @@ jobs:
         # 기존 중복 pip 설치를 통합하고 beautifulsoup4 추가
         run: |
           python -m pip install --upgrade pip
-          pip install requests beautifulsoup4 pdf2image google-generativeai pypdf
+          pip install requests beautifulsoup4 pdf2image google-generativeai pypdf finance-datareader
 
       # 1. 기존 KRX PDF 리포트 다운로드 및 텔레그램 발송 (원본 유지)
       - name: Run KRX Automation
