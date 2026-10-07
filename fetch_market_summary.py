@@ -1,6 +1,12 @@
 import os
 import requests
 import google.generativeai as genai
+from datetime import datetime, timezone, timedelta
+
+# 한국 시간(KST) 구하기
+def get_kst_now():
+    kst = timezone(timedelta(hours=9))
+    return datetime.now(kst)
 
 # ---------------------------------------------------------
 # 1. 100% 실시간 공식 네이버 금융 API (차단 우회 모바일 헤더)
@@ -12,9 +18,8 @@ def get_verified_market_data():
         'Accept': 'application/json, text/plain, */*'
     }
     
-    # 1. 지수 데이터 수집 (네이버 금융 공식 모바일 API)
-    kospi_str = "7,003.74 (+32.39 / +0.46%)"
-    kosdaq_str = "893.29 (-1.00 / -0.11%)"
+    kospi_str = "수신 실패"
+    kosdaq_str = "수신 실패"
 
     try:
         r_k = requests.get("https://m.stock.naver.com/api/index/KOSPI/basic", headers=headers, timeout=10).json()
@@ -49,7 +54,6 @@ def get_verified_market_data():
             rate = s.get("changeRate", "")
             vol = s.get("accumulatedTradingVolume", "")
             
-            # 동전주(1,000원 미만), 스팩, 우선주, 리츠 제외
             raw_price = int(price.replace(",", "")) if price else 0
             if raw_price < 1000 or any(x in name for x in ["스팩", "우", "1우", "2우B", "ETN", "리츠"]):
                 continue
@@ -89,19 +93,27 @@ def get_verified_market_data():
     }
 
 # ---------------------------------------------------------
-# 2. AI 팩트 기반 요약 (수치 임의 변경 절대 금지)
+# 2. AI 팩트 기반 요약 (동적 날짜 적용)
 # ---------------------------------------------------------
 def generate_brief_report(data):
     api_key = os.getenv("GEMINI_API_KEY")
+    
+    # 동적 날짜 포맷 (예: 10월 8일 목요일)
+    now_kst = get_kst_now()
+    weekdays_ko = ["월요일", "화요일", "수요일", "목요일", "금요일", "토요일", "일요일"]
+    date_str = f"{now_kst.month}월 {now_kst.day}일 {weekdays_ko[now_kst.weekday()]}"
+
+    fallback_text = f"📊 한국 증시 마감 지표 ({date_str} 마감 기준)\n\n- 코스피: {data['kospi']}\n- 코스닥: {data['kosdaq']}\n\n[주요 급등 종목]\n{data['stocks']}"
+
     if not api_key:
-        return f"📊 한국 증시 마감 지표\n\n- 코스피: {data['kospi']}\n- 코스닥: {data['kosdaq']}\n\n[주요 급등 종목]\n{data['stocks']}"
+        return fallback_text
 
     genai.configure(api_key=api_key)
     model = genai.GenerativeModel("gemini-2.5-flash")
     
     prompt = f"""
 당신은 엄격한 금융 데이터 검증관입니다.
-아래 데이터는 시스템이 실제 증시 API에서 수집한 최근 거래일(10월 2일 금요일) 공식 확정 데이터입니다.
+아래 데이터는 시스템이 실제 증시 API에서 수집한 당일({date_str}) 공식 확정 데이터입니다.
 
 [수집된 확정 수치]
 - 코스피: {data['kospi']}
@@ -111,11 +123,11 @@ def generate_brief_report(data):
 
 [수행 지침]
 1. 위 [수집된 확정 수치]에 적힌 숫자, 종목명, 등락률을 100% 그대로 사용하십시오. 절대로 다른 숫자로 바꾸지 마십시오.
-2. 각 종목별로 공식적인 상승 사유/테마를 사실에 기반하여 간결하게 1줄로 작성하십시오.
+2. 각 종목별로 당일({date_str}) 기준 공식 상승 사유/테마를 사실에 기반하여 간결하게 1줄로 작성하십시오. 과거 날짜의 뉴스를 가져오지 마십시오.
 3. 텔레그램 특수문자 오류 방지를 위해 마크다운 기호(*, _, [ 등)를 사용하지 마십시오.
 
 [출력 양식]
-📊 한국 증시 마감 브리프 (10월 2일 금요일 마감 기준)
+📊 한국 증시 마감 브리프 ({date_str} 마감 기준)
 
 ■ 시장 지수
 - 코스피: {data['kospi']}
@@ -132,7 +144,7 @@ def generate_brief_report(data):
         return response.text
     except Exception as e:
         print(f"Gemini 호출 실패: {e}")
-        return f"📊 한국 증시 마감 지표\n\n- 코스피: {data['kospi']}\n- 코스닥: {data['kosdaq']}\n\n[주요 급등 종목]\n{data['stocks']}"
+        return fallback_text
 
 # ---------------------------------------------------------
 # 3. 텔레그램 발송
