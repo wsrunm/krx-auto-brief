@@ -22,7 +22,7 @@ def get_kis_access_token(session, app_key, app_secret):
                 expires_at = cached.get("expires_at", 0)
                 
                 if token and (expires_at - current_time > 3600):
-                    print("♻️ 기존 KIS 토큰 재사용 (API 호출 생략)")
+                    print("♻️ 기존 KIS 토큰 재사용")
                     return token
         except Exception as e:
             print(f"⚠️ 토큰 캐시 읽기 실패: {e}")
@@ -48,7 +48,7 @@ def get_kis_access_token(session, app_key, app_secret):
             }
             with open(TOKEN_CACHE_FILE, "w", encoding="utf-8") as f:
                 json.dump(cache_data, f)
-            print("✅ KIS 토큰 발급 및 캐시 저장 완료")
+            print("✅ KIS 신규 토큰 발급 완료")
             return token
         else:
             print(f"❌ KIS 토큰 발급 거절: {data}")
@@ -58,18 +58,21 @@ def get_kis_access_token(session, app_key, app_secret):
         return None
 
 # ---------------------------------------------------------
-# 2. 직전 영업일 날짜 산출
+# 2. 직전 영업일 날짜 산출 (휴일 대응)
 # ---------------------------------------------------------
-def get_target_date_str():
+def get_target_business_day():
     cur = datetime.now()
-    if cur.weekday() == 5:    # 토요일
+    # 오늘이 공휴일(예: 10월 9일 한글날)이거나 주말이면 전일부터 탐색
+    cur -= timedelta(days=1)
+    while cur.weekday() >= 5:  # 토(5), 일(6) 건너뛰기
         cur -= timedelta(days=1)
-    elif cur.weekday() == 6:  # 일요일
-        cur -= timedelta(days=2)
-    return cur.strftime("%Y.%m.%d")
+        
+    date_api = cur.strftime("%Y%m%d")      # API 전달용: 20261008
+    date_display = cur.strftime("%Y.%m.%d") # 텔레그램 출력용: 2026.10.08
+    return date_api, date_display
 
 # ---------------------------------------------------------
-# 3. 코스피 / 코스닥 지수 수치 조회 (각 1회 호출)
+# 3. 코스피 / 코스닥 지수 수치 조회
 # ---------------------------------------------------------
 def get_market_index(session, token, app_key, app_secret, iscd):
     url = f"{BASE_URL}/uapi/domestic-stock/v1/quotations/inquire-index-price"
@@ -120,9 +123,9 @@ def get_market_index(session, token, app_key, app_secret, iscd):
     return "확인불가"
 
 # ---------------------------------------------------------
-# 4. 거래대금 상위 Top 20 (단 1회 호출)
+# 4. 거래대금 상위 Top 20 (직전 거래일자 명시)
 # ---------------------------------------------------------
-def get_trade_value_top20(session, token, app_key, app_secret):
+def get_trade_value_top20(session, token, app_key, app_secret, target_date):
     url = f"{BASE_URL}/uapi/domestic-stock/v1/ranking/trade-value"
     headers = {
         "Content-Type": "application/json; charset=utf-8",
@@ -135,7 +138,7 @@ def get_trade_value_top20(session, token, app_key, app_secret):
     params = {
         "FID_COND_MRKT_DIV_CODE": "J",
         "FID_COND_SCR_DIV_CODE": "20171",
-        "FID_INPUT_ISCD": "0001",          # 코스피 기준 주도주 상위
+        "FID_INPUT_ISCD": "0001",              # 코스피
         "FID_DIV_CLS_CODE": "0",
         "FID_BLNG_CLS_CODE": "0",
         "FID_TRGT_CLS_CODE": "111111111",
@@ -143,7 +146,7 @@ def get_trade_value_top20(session, token, app_key, app_secret):
         "FID_INPUT_PRICE_1": "",
         "FID_INPUT_PRICE_2": "",
         "FID_VOL_CNT": "",
-        "FID_INPUT_DATE_1": ""
+        "FID_INPUT_DATE_1": target_date        # 직전 거래일 날짜 지정
     }
     
     results = []
@@ -164,18 +167,16 @@ def get_trade_value_top20(session, token, app_key, app_secret):
                 results.append(f"{name}: {price:,}원 ({sign}{abs(rate):.2f}%, {vol:,}주)")
                 if len(results) >= 20:
                     break
+        else:
+            print(f"⚠️ 거래대금 순위 응답: {data.get('msg1')}")
     except Exception as e:
-        print(f"⚠️ 거래대금 순위 조회 예외: {e}")
+        print(f"⚠️ 거래대금 순위 예외: {e}")
     return results
 
 # ---------------------------------------------------------
-# 5. 외인 / 기관 순매수 랭킹 API (각 1회 호출로 20개 일괄 수집)
+# 5. 외인 / 기관 순매수 랭킹 API (직전 거래일자 명시)
 # ---------------------------------------------------------
-def get_investor_ranking(session, token, app_key, app_secret, trgt_type="2"):
-    """
-    국내주식 투자자별 매매상위 (FHPST01720000)
-    trgt_type: '2' (외국인 순매수), '3' (기관 순매수)
-    """
+def get_investor_ranking(session, token, app_key, app_secret, target_date, trgt_type="2"):
     url = f"{BASE_URL}/uapi/domestic-stock/v1/ranking/investor-buy-sell"
     headers = {
         "Content-Type": "application/json; charset=utf-8",
@@ -188,15 +189,16 @@ def get_investor_ranking(session, token, app_key, app_secret, trgt_type="2"):
     params = {
         "FID_COND_MRKT_DIV_CODE": "J",
         "FID_COND_SCR_DIV_CODE": "20172",
-        "FID_INPUT_ISCD": "0001",          # 코스피
-        "FID_DIV_CLS_CODE": "0",           # 0: 순매수
-        "FID_RANK_SORT_CLS_CODE": trgt_type, # 2: 외인, 3: 기관
+        "FID_INPUT_ISCD": "0001",              # 코스피
+        "FID_DIV_CLS_CODE": "0",               # 순매수
+        "FID_RANK_SORT_CLS_CODE": trgt_type,   # 2: 외인, 3: 기관
         "FID_INPUT_CNT_1": "0",
         "FID_TRGT_CLS_CODE": "0",
         "FID_TRGT_EXLS_CLS_CODE": "0",
         "FID_INPUT_PRICE_1": "",
         "FID_INPUT_PRICE_2": "",
-        "FID_VOL_CNT": ""
+        "FID_VOL_CNT": "",
+        "FID_INPUT_DATE_1": target_date        # 직전 거래일 날짜 지정
     }
     
     results = []
@@ -214,8 +216,10 @@ def get_investor_ranking(session, token, app_key, app_secret, trgt_type="2"):
                 results.append(f"{name}: {sign}{qty:,}주")
                 if len(results) >= 20:
                     break
+        else:
+            print(f"⚠️ 수급 랭킹({trgt_type}) 응답: {data.get('msg1')}")
     except Exception as e:
-        print(f"⚠️ 수급 랭킹({trgt_type}) 조회 예외: {e}")
+        print(f"⚠️ 수급 랭킹({trgt_type}) 예외: {e}")
     return results
 
 # ---------------------------------------------------------
@@ -226,13 +230,13 @@ def generate_part1_report(date_str, kospi, kosdaq, top_stocks):
     stocks_text = "\n".join(lines) if lines else "수집된 거래대금 상위 종목 없음"
     
     api_key = os.getenv("GEMINI_API_KEY")
-    ai_comment = "금일 마감 지수와 대형 거래대금 주도주 중심 장세입니다."
-    if api_key:
+    ai_comment = "해당 거래일 대형 거래대금 주도주 중심의 시장 장세입니다."
+    if api_key and top_stocks:
         genai.configure(api_key=api_key)
         model = genai.GenerativeModel("gemini-2.5-flash")
         prompt = f"""
 당신은 엄격한 증시 리서치 연구원입니다.
-아래 거래대금 상위 20개 종목을 보고 시장 주도 테마와 핵심 흐름을 2~3줄로 깔끔하게 요약하십시오.
+아래 거래대금 상위 20개 종목을 바탕으로, 해당 거래일 시장 주도 테마와 핵심 흐름을 2~3줄로 깔끔하게 요약하십시오.
 특수문자 마크다운(*, _, [ 등)은 절대 사용하지 마십시오.
 
 [거래대금 상위 종목]
@@ -244,7 +248,7 @@ def generate_part1_report(date_str, kospi, kosdaq, top_stocks):
         except Exception as e:
             print(f"Gemini 호출 에러: {e}")
 
-    return f"""📊 [1/2] 한국 증시 마감 브리프 ({date_str})
+    return f"""📊 [1/2] 한국 증시 마감 브리프 ({date_str} 마감 기준)
 
 ■ 시장 마감 지수
 - 코스피: {kospi}
@@ -260,7 +264,7 @@ def generate_part2_report(date_str, frgn_stocks, orgn_stocks):
     frgn_lines = [f"{idx:02d}. {item}" for idx, item in enumerate(frgn_stocks, 1)]
     orgn_lines = [f"{idx:02d}. {item}" for idx, item in enumerate(orgn_stocks, 1)]
     
-    return f"""📈 [2/2] 외인 / 기관 수급 순위 ({date_str})
+    return f"""📈 [2/2] 외인 / 기관 수급 순위 ({date_str} 마감 기준)
 
 ■ 외국인 순매수 Top 20
 {chr(10).join(frgn_lines) if frgn_lines else "데이터 없음"}
@@ -292,31 +296,31 @@ if __name__ == "__main__":
     if not token:
         exit(1)
         
-    date_str = get_target_date_str()
-    print("🚀 최소 호출 파이프라인 가동 (총 5~6회 호출)...")
+    date_api, date_display = get_target_business_day()
+    print(f"🚀 기준 거래일: {date_api} ({date_display}). 데이터 수집 시작...")
     
-    # 1. 지수 (2회)
+    # 1. 지수 조회 (2회)
     kospi = get_market_index(session, token, app_key, app_secret, "0001")
     kosdaq = get_market_index(session, token, app_key, app_secret, "1001")
     time.sleep(0.1)
     
-    # 2. 거래대금 상위 20위 (1회)
-    trade_top20 = get_trade_value_top20(session, token, app_key, app_secret)
+    # 2. 거래대금 상위 20위 (직전 거래일 지정, 1회)
+    trade_top20 = get_trade_value_top20(session, token, app_key, app_secret, date_api)
     time.sleep(0.1)
     
-    # 3. 외인 순매수 상위 20위 (1회)
-    frgn_top20 = get_investor_ranking(session, token, app_key, app_secret, trgt_type="2")
+    # 3. 외인 순매수 상위 20위 (직전 거래일 지정, 1회)
+    frgn_top20 = get_investor_ranking(session, token, app_key, app_secret, date_api, trgt_type="2")
     time.sleep(0.1)
     
-    # 4. 기관 순매수 상위 20위 (1회)
-    orgn_top20 = get_investor_ranking(session, token, app_key, app_secret, trgt_type="3")
+    # 4. 기관 순매수 상위 20위 (직전 거래일 지정, 1회)
+    orgn_top20 = get_investor_ranking(session, token, app_key, app_secret, date_api, trgt_type="3")
     
     # 1번 메시지 발송
-    msg1 = generate_part1_report(date_str, kospi, kosdaq, trade_top20)
+    msg1 = generate_part1_report(date_display, kospi, kosdaq, trade_top20)
     send_telegram(msg1)
     print("✅ 1번 브리프 발송 완료")
     
     # 2번 메시지 발송
-    msg2 = generate_part2_report(date_str, frgn_top20, orgn_top20)
+    msg2 = generate_part2_report(date_display, frgn_top20, orgn_top20)
     send_telegram(msg2)
     print("✅ 2번 수급 브리프 발송 완료")
