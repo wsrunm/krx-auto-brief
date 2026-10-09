@@ -37,7 +37,6 @@ jobs:
           sudo apt-get install -y poppler-utils fonts-nanum
 
       - name: Install Python Dependencies
-        # 기존 중복 pip 설치를 통합하고 beautifulsoup4 추가
         run: |
           python -m pip install --upgrade pip
           pip install requests beautifulsoup4 pdf2image google-generativeai pypdf finance-datareader
@@ -51,24 +50,36 @@ jobs:
           GDRIVE_SERVICE_ACCOUNT: ${{ secrets.GDRIVE_SERVICE_ACCOUNT }}
         run: python krx_brief.py
 
-      # 2. 실측 마감 데이터 + AI 테마 요약 발송 (신규 추가)
-      # continue-on-error: 오류 발생 시에도 3번 커밋 스텝이 차단되지 않도록 보호
+      # [추가 1] KIS 토큰 파일 캐싱 (연속 테스트 시 재발급 차단 방지)
+      - name: Cache KIS Token
+        uses: actions/cache@v4
+        with:
+          path: kis_token.json
+          key: kis-token-cache-${{ github.ref_name }}
+          restore-keys: |
+            kis-token-cache-
+
+      # 2. 실측 마감 데이터 + AI 테마 요약 발송
+      # [추가 2] KIS_APP_KEY, KIS_APP_SECRET 주입
       - name: Run Market Data Summary
         continue-on-error: true
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          KIS_APP_KEY: ${{ secrets.KIS_APP_KEY }}
+          KIS_APP_SECRET: ${{ secrets.KIS_APP_SECRET }}
         run: python fetch_market_summary.py
 
       # 3. 변경 파일(PDF, JPG 등) 커밋 및 푸시
-      # 충돌 방지(git pull --rebase) 로직이 포함된 안전 버전 단일 적용
       - name: Commit and Push changes
         run: |
           git config --global user.name 'github-actions'
           git config --global user.email 'action@github.com'
           
           git add -A
+          # [추가 3] 보안 토큰 파일 커밋 방지
+          git reset kis_token.json 2>/dev/null || true
           
           if ! git diff --cached --quiet; then
             git commit -m "chore: cleanup old reports and update latest"
