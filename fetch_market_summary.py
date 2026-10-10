@@ -8,7 +8,7 @@ BASE_URL = "https://openapi.koreainvestment.com:9443"
 TOKEN_CACHE_FILE = "kis_token.json"
 
 # ---------------------------------------------------------
-# 1. KIS 접근 토큰 관리 (실패해도 프로세스 다운 방지)
+# 1. KIS OAuth2 토큰 (유효성 체크 후 재사용)
 # ---------------------------------------------------------
 def get_kis_access_token(session, app_key, app_secret):
     current_time = time.time()
@@ -19,12 +19,12 @@ def get_kis_access_token(session, app_key, app_secret):
                 token = cached.get("access_token")
                 expires_at = cached.get("expires_at", 0)
                 if token and (expires_at - current_time > 3600):
-                    print("♻️ 기존 KIS 토큰 재사용")
+                    print("♻️ 기존 토큰 재사용")
                     return token
-        except Exception as e:
-            print(f"⚠️ 토큰 캐시 읽기 실패: {e}")
+        except Exception:
+            pass
 
-    print("🔑 KIS 신규 토큰 발급 요청...")
+    print("🔑 신규 토큰 발급...")
     url = f"{BASE_URL}/oauth2/tokenP"
     headers = {"Content-Type": "application/json"}
     body = {
@@ -32,7 +32,6 @@ def get_kis_access_token(session, app_key, app_secret):
         "appkey": app_key,
         "appsecret": app_secret
     }
-    
     try:
         res = session.post(url, headers=headers, data=json.dumps(body), timeout=10)
         data = res.json()
@@ -41,16 +40,14 @@ def get_kis_access_token(session, app_key, app_secret):
             expires_in = int(data.get("expires_in", 86400))
             with open(TOKEN_CACHE_FILE, "w", encoding="utf-8") as f:
                 json.dump({"access_token": token, "expires_at": current_time + expires_in}, f)
-            print("✅ KIS 토큰 발급 완료")
+            print("✅ 토큰 발급 완료")
             return token
-        else:
-            print(f"⚠️ KIS 토큰 거절: {data}")
     except Exception as e:
-        print(f"⚠️ KIS 토큰 통신 예외: {e}")
+        print(f"⚠️ 토큰 통신 에러: {e}")
     return None
 
 # ---------------------------------------------------------
-# 2. 코스피 / 코스닥 지수 수치 조회
+# 2. 지수 조회 (코스피 0001, 코스닥 1001)
 # ---------------------------------------------------------
 def get_market_index(session, token, app_key, app_secret, iscd):
     if not token:
@@ -66,91 +63,157 @@ def get_market_index(session, token, app_key, app_secret, iscd):
     }
     params = {"FID_COND_MRKT_DIV_CODE": "U", "FID_INPUT_ISCD": iscd}
     
-    try:
-        res = session.get(url, headers=headers, params=params, timeout=10)
-        data = res.json()
-        if res.status_code == 200 and data.get("rt_cd") == "0":
-            out = data.get("output", {})
-            price_val = out.get("bstp_nmix_prpr") or out.get("bstp_nmix_prdy_clpr", "0")
-            vrss_val = out.get("bstp_nmix_prdy_vrss", "0")
-            rate_val = out.get("bstp_nmix_prdy_cttr", "0")
-            sign = out.get("prdy_vrss_sign", "3")
+    for _ in range(3):
+        try:
+            res = session.get(url, headers=headers, params=params, timeout=10)
+            data = res.json()
+            if res.status_code == 200 and data.get("rt_cd") == "0":
+                out = data.get("output", {})
+                price_val = out.get("bstp_nmix_prpr") or out.get("bstp_nmix_prdy_clpr", "0")
+                vrss_val = out.get("bstp_nmix_prdy_vrss", "0")
+                rate_val = out.get("bstp_nmix_prdy_cttr", "0")
+                sign = out.get("prdy_vrss_sign", "3")
+                
+                price = float(price_val)
+                prdy_vrss = float(vrss_val)
+                rate = float(rate_val) if rate_val else 0.0
+                
+                is_down = sign in ["4", "5"]
+                signed_vrss = -abs(prdy_vrss) if is_down else abs(prdy_vrss)
+                if rate == 0.0 and prdy_vrss != 0:
+                    prev_price = price - signed_vrss
+                    if prev_price > 0:
+                        rate = abs((signed_vrss / prev_price) * 100)
+                
+                direction = "-" if is_down else ("+" if sign in ["1", "2"] else "")
+                return f"{price:,.2f} ({direction}{abs(prdy_vrss):,.2f} / {direction}{rate:.2f}%)"
+        except Exception:
+            time.sleep(0.5)
             
-            price = float(price_val)
-            prdy_vrss = float(vrss_val)
-            rate = float(rate_val) if rate_val else 0.0
-            
-            is_down = sign in ["4", "5"]
-            signed_vrss = -abs(prdy_vrss) if is_down else abs(prdy_vrss)
-            if rate == 0.0 and prdy_vrss != 0:
-                prev_price = price - signed_vrss
-                if prev_price > 0:
-                    rate = abs((signed_vrss / prev_price) * 100)
-            
-            direction = "-" if is_down else ("+" if sign in ["1", "2"] else "")
-            return f"{price:,.2f} ({direction}{abs(prdy_vrss):,.2f} / {direction}{rate:.2f}%)"
-    except Exception as e:
-        print(f"⚠️ 지수({iscd}) 조회 예외: {e}")
     return "확인불가"
 
 # ---------------------------------------------------------
-# 3. 원/달러 환율 조회
+# 3. 원/달러 환율 (해외 IP 차단 없는 Yahoo Finance)
 # ---------------------------------------------------------
 def get_usd_krw_rate(session):
-    url = "https://m.stock.naver.com/front-api/marketIndex/exchange/FX_USDKRW"
+    url = "https://query1.finance.yahoo.com/v8/finance/chart/USDKRW=X?interval=1d&range=5d"
     headers = {'User-Agent': 'Mozilla/5.0'}
     try:
-        res = session.get(url, headers=headers, timeout=5)
+        res = session.get(url, headers=headers, timeout=10)
         if res.status_code == 200:
-            data = res.json().get("result", {})
-            price = data.get("closePrice", "0")
-            rate = data.get("fluctuationRate", "0.0")
-            sign = "+" if float(rate) > 0 else ("-" if float(rate) < 0 else "")
-            diff = data.get("fluctuationAmount", "0")
-            return f"{price}원 ({sign}{diff} / {sign}{abs(float(rate)):.2f}%)"
+            meta = res.json().get("chart", {}).get("result", [{}])[0].get("meta", {})
+            price = meta.get("regularMarketPrice", 0.0)
+            prev = meta.get("chartPreviousClose", 0.0)
+            if price and prev:
+                diff = price - prev
+                rate = (diff / prev) * 100
+                direction = "+" if diff > 0 else ("-" if diff < 0 else "")
+                return f"{price:,.2f}원 ({direction}{abs(diff):,.2f} / {direction}{abs(rate):.2f}%)"
     except Exception as e:
         print(f"⚠️ 환율 조회 예외: {e}")
     return "확인불가"
 
 # ---------------------------------------------------------
-# 4. 순위별 Top 15 수집 (거래대금, 외인/기관 순매수)
+# 4. 거래대금 상위 1~15위 (현재 기준 스냅샷)
 # ---------------------------------------------------------
-def fetch_top15_stocks(session, market_type, ranking_type):
-    url = f"https://m.stock.naver.com/api/stocks/ranking/{market_type}?page=1&pageSize=30&rankingType={ranking_type}"
+def get_trade_value_top15(session, token, app_key, app_secret, iscd):
+    if not token:
+        return []
+    url = f"{BASE_URL}/uapi/domestic-stock/v1/quotations/volume-rank"
     headers = {
-        'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko)',
-        'Referer': 'https://m.stock.naver.com/'
+        "Content-Type": "application/json; charset=utf-8",
+        "authorization": f"Bearer {token}",
+        "appkey": app_key,
+        "appsecret": app_secret,
+        "tr_id": "FHPST01710000",
+        "custtype": "P"
     }
+    # FID_BLNG_CLS_CODE="3" -> 거래대금 순 정렬
+    params = {
+        "FID_COND_MRKT_DIV_CODE": "J",
+        "FID_COND_SCR_DIV_CODE": "20171",
+        "FID_INPUT_ISCD": iscd,
+        "FID_DIV_CLS_CODE": "0",
+        "FID_BLNG_CLS_CODE": "3",
+        "FID_TRGT_CLS_CODE": "111111111",
+        "FID_TRGT_EXLS_CLS_CODE": "0",
+        "FID_INPUT_PRICE_1": "",
+        "FID_INPUT_PRICE_2": "",
+        "FID_VOL_CNT": "",
+        "FID_INPUT_DATE_1": ""
+    }
+    
     results = []
     try:
-        res = session.get(url, headers=headers, timeout=10)
-        if res.status_code == 200:
-            for s in res.json().get("stocks", []):
-                name = s.get("stockName", "").strip()
+        res = session.get(url, headers=headers, params=params, timeout=10)
+        data = res.json()
+        if res.status_code == 200 and data.get("rt_cd") == "0":
+            for s in data.get("output", []):
+                name = s.get("hts_kor_isnm", "").strip()
                 if any(x in name for x in ["스팩", "우", "1우", "2우B", "ETN", "리츠"]):
                     continue
+                price = int(str(s.get("stck_prpr", "0")).replace(",", ""))
+                rate_str = str(s.get("prdy_cttr", s.get("prdy_vrss_rt", "0.0"))).replace(",", "")
+                rate = float(rate_str) if rate_str.replace(".", "", 1).replace("-", "").isdigit() else 0.0
+                trade_amt = int(str(s.get("acml_tr_pbmn", "0")).replace(",", "")) // 100000000
+                sign = "+" if rate > 0 else ("-" if rate < 0 else "")
                 
-                price = s.get("nowPrice", "0")
-                rate = s.get("changeRate", "0.0")
-                sign = "+" if float(rate) > 0 else ""
-                
-                if ranking_type == "tradeValue":
-                    trade_amt = int(s.get("accumulatedTradingValue", "0")) // 100000000
-                    results.append(f"{name}: {price}원 ({sign}{rate}%, {trade_amt:,}억)")
-                else:
-                    quant = s.get("quant", s.get("accumulatedTradingVolume", "0"))
-                    q_str = str(quant).replace(",", "")
-                    try:
-                        q_val = int(q_str)
-                        q_sign = "+" if q_val > 0 else ""
-                        results.append(f"{name}: {price}원 ({sign}{rate}%, {q_sign}{q_val:,}주)")
-                    except ValueError:
-                        results.append(f"{name}: {price}원 ({sign}{rate}%, {quant}주)")
-                    
+                results.append(f"{name}: {price:,}원 ({sign}{abs(rate):.2f}%, {trade_amt:,}억)")
                 if len(results) >= 15:
                     break
     except Exception as e:
-        print(f"⚠️ {market_type} {ranking_type} 파싱 예외: {e}")
+        print(f"⚠️ 거래대금({iscd}) 파싱 예외: {e}")
+    return results
+
+# ---------------------------------------------------------
+# 5. 외인/기관 순매수 상위 1~15위 (현재 기준 스냅샷)
+# ---------------------------------------------------------
+def get_investor_top15(session, token, app_key, app_secret, iscd, sort_type="2"):
+    """sort_type: 2 (외국인 순매수), 3 (기관 순매수)"""
+    if not token:
+        return []
+    url = f"{BASE_URL}/uapi/domestic-stock/v1/quotations/investor-trend-estimate"
+    headers = {
+        "Content-Type": "application/json; charset=utf-8",
+        "authorization": f"Bearer {token}",
+        "appkey": app_key,
+        "appsecret": app_secret,
+        "tr_id": "FHPST01720000",
+        "custtype": "P"
+    }
+    params = {
+        "FID_COND_MRKT_DIV_CODE": "J",
+        "FID_COND_SCR_DIV_CODE": "20172",
+        "FID_INPUT_ISCD": iscd,
+        "FID_DIV_CLS_CODE": "0",
+        "FID_RANK_SORT_CLS_CODE": sort_type,
+        "FID_INPUT_CNT_1": "0",
+        "FID_TRGT_CLS_CODE": "0",
+        "FID_TRGT_EXLS_CLS_CODE": "0",
+        "FID_INPUT_PRICE_1": "",
+        "FID_INPUT_PRICE_2": "",
+        "FID_VOL_CNT": "",
+        "FID_INPUT_DATE_1": ""
+    }
+    
+    results = []
+    try:
+        res = session.get(url, headers=headers, params=params, timeout=10)
+        data = res.json()
+        if res.status_code == 200 and data.get("rt_cd") == "0":
+            for s in data.get("output", []):
+                name = s.get("hts_kor_isnm", "").strip()
+                if any(x in name for x in ["스팩", "우", "1우", "2우B", "ETN", "리츠"]):
+                    continue
+                price = int(str(s.get("stck_prpr", "0")).replace(",", ""))
+                qty_raw = str(s.get("ntby_qty", s.get("frgn_ntby_qty", "0"))).replace(",", "")
+                qty = int(qty_raw) if qty_raw.replace("-", "").isdigit() else 0
+                sign = "+" if qty > 0 else ""
+                results.append(f"{name}: {price:,}원 ({sign}{qty:,}주)")
+                if len(results) >= 15:
+                    break
+    except Exception as e:
+        print(f"⚠️ 수급({iscd}) 파싱 예외: {e}")
     return results
 
 def build_list_text(items):
@@ -159,12 +222,12 @@ def build_list_text(items):
     return "\n".join([f"{idx:02d}. {item}" for idx, item in enumerate(items, 1)])
 
 # ---------------------------------------------------------
-# 5. 시장 동향 및 특징 테마 AI 분석
+# 6. 시장 분석 및 테마 5개/종목 5개 생성 (Gemini)
 # ---------------------------------------------------------
-def generate_market_and_theme_analysis(kospi, kosdaq, usd_krw, top_data_summary):
+def generate_market_and_theme_analysis(kospi, kosdaq, usd_krw, top_summary):
     api_key = os.getenv("GEMINI_API_KEY")
     if not api_key:
-        return "5. 시장 동향 분석\n데이터 기반 분석 대기\n\n6. 특징테마\n정보 없음"
+        return "5. 시장 동향 분석\n데이터 분석 대기\n\n6. 특징테마\n정보 없음"
 
     prompt = f"""
 당신은 대한민국 최고 수준의 증시 리서치센터 연구원입니다.
@@ -174,7 +237,7 @@ def generate_market_and_theme_analysis(kospi, kosdaq, usd_krw, top_data_summary)
 - 코스피: {kospi}
 - 코스닥: {kosdaq}
 - 원/달러 환율: {usd_krw}
-{top_data_summary}
+{top_summary}
 
 [지침]
 1. 제5항 [시장 동향 분석]: 지수 등락 원인, 거시경제 및 수급 흐름을 3~5줄로 분석하십시오.
@@ -198,36 +261,25 @@ def generate_market_and_theme_analysis(kospi, kosdaq, usd_krw, top_data_summary)
 """
     try:
         genai.configure(api_key=api_key)
-        # 안정성을 위해 fallback 모델 시도 포함
-        for m_name in ["gemini-2.5-flash", "gemini-1.5-flash"]:
-            try:
-                model = genai.GenerativeModel(m_name)
-                res = model.generate_content(prompt)
-                if res and res.text:
-                    return res.text.strip()
-            except Exception:
-                continue
+        model = genai.GenerativeModel("gemini-2.5-flash")
+        res = model.generate_content(prompt)
+        if res and res.text:
+            return res.text.strip()
     except Exception as e:
-        print(f"⚠️ Gemini 예외: {e}")
+        print(f"⚠️ Gemini 분석 에러: {e}")
         
-    return "5. 시장 동향 분석\n지수 및 대형 거래대금 주도주 중심의 시장 장세입니다.\n\n6. 특징테마 및 주요 종목\n데이터 수집 완료 후 테마 분석이 진행됩니다."
+    return "5. 시장 동향 분석\n거래대금 상위 주도주 중심의 시장 장세입니다.\n\n6. 특징테마 및 주요 종목\n데이터 수집 완료 후 테마 분석이 진행됩니다."
 
 # ---------------------------------------------------------
-# 6. 텔레그램 발송
+# 7. 텔레그램 발송
 # ---------------------------------------------------------
 def send_telegram(session, text):
     bot_token = os.getenv("TELEGRAM_TOKEN")
     chat_id = os.getenv("TELEGRAM_CHAT_ID")
     if not bot_token or not chat_id:
-        print("⚠️ 텔레그램 토큰 또는 챗ID 누락")
         return
     url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
-    try:
-        res = session.post(url, json={"chat_id": chat_id, "text": text}, timeout=10)
-        if res.status_code != 200:
-            print(f"⚠️ 텔레그램 전송 실패: {res.text}")
-    except Exception as e:
-        print(f"⚠️ 텔레그램 발송 예외: {e}")
+    session.post(url, json={"chat_id": chat_id, "text": text}, timeout=10)
 
 # ---------------------------------------------------------
 # 메인 실행 파이프라인
@@ -237,35 +289,35 @@ if __name__ == "__main__":
     app_secret = os.getenv("KIS_APP_SECRET")
     
     session = requests.Session()
+    token = get_kis_access_token(session, app_key, app_secret) if (app_key and app_secret) else None
     
-    # 1. KIS 인증 (실패해도 중단 없이 계속 진행)
-    token = None
-    if app_key and app_secret:
-        token = get_kis_access_token(session, app_key, app_secret)
-    else:
-        print("⚠️ KIS 환경변수 미설정, 지수 조회 건너뜀")
+    print("🚀 현재 최신 스냅샷 기준 수집 시작...")
     
-    print("🚀 데이터 수집 시작...")
-    
-    # 1. 지수 및 환율
+    # 1. 지수 및 환율 (대기 시간 0.5초로 스로틀링 방지)
     kospi = get_market_index(session, token, app_key, app_secret, "0001")
-    time.sleep(0.1)
+    time.sleep(0.5)
     kosdaq = get_market_index(session, token, app_key, app_secret, "1001")
     usd_krw = get_usd_krw_rate(session)
+    time.sleep(0.5)
     
-    # 2. 거래대금 상위 1~15위
-    kospi_trade = fetch_top15_stocks(session, "KOSPI", "tradeValue")
-    kosdaq_trade = fetch_top15_stocks(session, "KOSDAQ", "tradeValue")
+    # 2. 거래대금 상위 Top 15 (코스피 / 코스닥)
+    kospi_trade = get_trade_value_top15(session, token, app_key, app_secret, "0001")
+    time.sleep(0.5)
+    kosdaq_trade = get_trade_value_top15(session, token, app_key, app_secret, "1001")
+    time.sleep(0.5)
     
-    # 3. 외국인 순매수 상위 1~15위
-    kospi_frgn = fetch_top15_stocks(session, "KOSPI", "foreignNetBuy")
-    kosdaq_frgn = fetch_top15_stocks(session, "KOSDAQ", "foreignNetBuy")
+    # 3. 외국인 순매수 Top 15 (코스피 / 코스닥)
+    kospi_frgn = get_investor_top15(session, token, app_key, app_secret, "0001", sort_type="2")
+    time.sleep(0.5)
+    kosdaq_frgn = get_investor_top15(session, token, app_key, app_secret, "1001", sort_type="2")
+    time.sleep(0.5)
     
-    # 4. 기관 순매수 상위 1~15위
-    kospi_orgn = fetch_top15_stocks(session, "KOSPI", "institutionNetBuy")
-    kosdaq_orgn = fetch_top15_stocks(session, "KOSDAQ", "institutionNetBuy")
+    # 4. 기관 순매수 Top 15 (코스피 / 코스닥)
+    kospi_orgn = get_investor_top15(session, token, app_key, app_secret, "0001", sort_type="3")
+    time.sleep(0.5)
+    kosdaq_orgn = get_investor_top15(session, token, app_key, app_secret, "1001", sort_type="3")
     
-    # 5~6. 시장 분석 및 테마 요약
+    # 5~6. 시장 분석 데이터 취합
     summary_data = f"""
 [코스피 거래대금 상위]
 {build_list_text(kospi_trade[:5])}
@@ -279,10 +331,9 @@ if __name__ == "__main__":
     analysis_text = generate_market_and_theme_analysis(kospi, kosdaq, usd_krw, summary_data)
     
     # ==========================================
-    # 메시지 1 발송
+    # 메시지 1: [1번 지수/환율] + [2번 거래대금 Top 15]
     # ==========================================
-    try:
-        msg1 = f"""📊 [1/3] 마감 지표 및 거래대금 순위
+    msg1 = f"""📊 [1/3] 마감 지표 및 거래대금 순위
 
 1. 코스피, 코스닥 지수 및 원달러 환율
 - 코스피: {kospi}
@@ -295,17 +346,14 @@ if __name__ == "__main__":
 
 ■ 코스닥 거래대금 Top 15
 {build_list_text(kosdaq_trade)}"""
-        send_telegram(session, msg1)
-        print("✅ 1번 메시지 발송 완료")
-    except Exception as e:
-        print(f"⚠️ 1번 메시지 발송 오류: {e}")
+    send_telegram(session, msg1)
+    print("✅ 1번 메시지 발송 완료")
     time.sleep(1)
 
     # ==========================================
-    # 메시지 2 발송
+    # 메시지 2: [3번 외국인 순매수 Top 15] + [4번 기관 순매수 Top 15]
     # ==========================================
-    try:
-        msg2 = f"""📈 [2/3] 외국인 및 기관 순매수 순위
+    msg2 = f"""📈 [2/3] 외국인 및 기관 순매수 순위
 
 3. 외국인 순매수(금액) 순위 1~15위
 ■ 코스피 외국인 순매수 Top 15
@@ -320,20 +368,15 @@ if __name__ == "__main__":
 
 ■ 코스닥 기관 순매수 Top 15
 {build_list_text(kosdaq_orgn)}"""
-        send_telegram(session, msg2)
-        print("✅ 2번 메시지 발송 완료")
-    except Exception as e:
-        print(f"⚠️ 2번 메시지 발송 오류: {e}")
+    send_telegram(session, msg2)
+    print("✅ 2번 메시지 발송 완료")
     time.sleep(1)
 
     # ==========================================
-    # 메시지 3 발송
+    # 메시지 3: [5번 시장 동향 분석] + [6번 특징테마 5개 및 주요주식 5개]
     # ==========================================
-    try:
-        msg3 = f"""📰 [3/3] 시장 종합 분석 및 특징테마
+    msg3 = f"""📰 [3/3] 시장 종합 분석 및 특징테마
 
 {analysis_text}"""
-        send_telegram(session, msg3)
-        print("✅ 3번 메시지 발송 완료")
-    except Exception as e:
-        print(f"⚠️ 3번 메시지 발송 오류: {e}")
+    send_telegram(session, msg3)
+    print("✅ 3번 메시지 발송 완료")
