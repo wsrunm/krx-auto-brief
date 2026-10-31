@@ -168,27 +168,35 @@ def get_trade_value_top15(session, token, app_key, app_secret, iscd):
 # ---------------------------------------------------------
 # 5. 외인/기관 순매수 상위 1~15위 (현재 기준 스냅샷)
 # ---------------------------------------------------------
-def get_investor_top15(session, token, app_key, app_secret, iscd, sort_type="2"):
-    """sort_type: 2 (외국인 순매수), 3 (기관 순매수)"""
+# ---------------------------------------------------------
+# 5. 외인/기관 순매수 상위 1~15위 (KIS 공식 국내주식 순매수 상위 TR)
+# ---------------------------------------------------------
+def get_investor_top15_kis(session, token, app_key, app_secret, mrkt_div="0001", investor_type="1"):
+    """
+    mrkt_div: '0001' (코스피), '1001' (코스닥)
+    investor_type: '1' (외국인), '2' (기관계)
+    """
     if not token:
         return []
-    url = f"{BASE_URL}/uapi/domestic-stock/v1/quotations/investor-trend-estimate"
+        
+    url = f"{BASE_URL}/uapi/domestic-stock/v1/ranking/net-buy-rank"
     headers = {
         "Content-Type": "application/json; charset=utf-8",
         "authorization": f"Bearer {token}",
         "appkey": app_key,
         "appsecret": app_secret,
-        "tr_id": "FHPST01720000",
+        "tr_id": "FHPTJ04400000",
         "custtype": "P"
     }
+    
+    # KIS 순매수 상위 공식 파라미터 규격
     params = {
         "FID_COND_MRKT_DIV_CODE": "J",
-        "FID_COND_SCR_DIV_CODE": "20172",
-        "FID_INPUT_ISCD": iscd,
-        "FID_DIV_CLS_CODE": "0",
-        "FID_RANK_SORT_CLS_CODE": sort_type,
-        "FID_INPUT_CNT_1": "0",
-        "FID_TRGT_CLS_CODE": "0",
+        "FID_COND_SCR_DIV_CODE": "20440",
+        "FID_INPUT_ISCD": mrkt_div,
+        "FID_DIV_CLS_CODE": "0",            # 0: 전체, 1: 보통주
+        "FID_BLNG_CLS_CODE": "0",           # 0: 매매대금순, 1: 매매량순
+        "FID_TRGT_CLS_CODE": investor_type,  # 1: 외국인, 2: 기관계
         "FID_TRGT_EXLS_CLS_CODE": "0",
         "FID_INPUT_PRICE_1": "",
         "FID_INPUT_PRICE_2": "",
@@ -205,21 +213,25 @@ def get_investor_top15(session, token, app_key, app_secret, iscd, sort_type="2")
                 name = s.get("hts_kor_isnm", "").strip()
                 if any(x in name for x in ["스팩", "우", "1우", "2우B", "ETN", "리츠"]):
                     continue
+                
                 price = int(str(s.get("stck_prpr", "0")).replace(",", ""))
-                qty_raw = str(s.get("ntby_qty", s.get("frgn_ntby_qty", "0"))).replace(",", "")
-                qty = int(qty_raw) if qty_raw.replace("-", "").isdigit() else 0
-                sign = "+" if qty > 0 else ""
-                results.append(f"{name}: {price:,}원 ({sign}{qty:,}주)")
+                # 순매수 금액 (단위: 백만원 -> 억원 변환)
+                net_amt = int(str(s.get("ntby_amt", "0")).replace(",", "")) // 100
+                # 순매수 수량
+                net_qty = int(str(s.get("ntby_qty", "0")).replace(",", ""))
+                
+                sign_amt = "+" if net_amt > 0 else ""
+                sign_qty = "+" if net_qty > 0 else ""
+                
+                results.append(f"{name}: {price:,}원 ({sign_amt}{net_amt:,}억 / {sign_qty}{net_qty:,}주)")
                 if len(results) >= 15:
                     break
+        else:
+            print(f"⚠️ KIS 순매수 API 응답 실패: {data.get('msg1')}")
     except Exception as e:
-        print(f"⚠️ 수급({iscd}) 파싱 예외: {e}")
+        print(f"⚠️ KIS 수급 파싱 예외: {e}")
+        
     return results
-
-def build_list_text(items):
-    if not items:
-        return "데이터 없음"
-    return "\n".join([f"{idx:02d}. {item}" for idx, item in enumerate(items, 1)])
 
 # ---------------------------------------------------------
 # 6. 시장 분석 및 테마 5개/종목 5개 생성 (Gemini)
